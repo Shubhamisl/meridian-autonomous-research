@@ -19,20 +19,30 @@ class FakeOpenRouterClient:
 
 
 @pytest.mark.asyncio
-async def test_classify_normalizes_valid_label():
-    client = FakeOpenRouterClient("  Computer_Science \n")
+@pytest.mark.parametrize(
+    ("response_text", "expected_label"),
+    [
+        ("  Computer_Science \n", "computer_science"),
+        ("computer science", "computer_science"),
+        ("computer_science.", "computer_science"),
+        ('"legal"', "legal"),
+        ("Label: biomedical", "biomedical"),
+    ],
+)
+async def test_classify_normalizes_realistic_label_variants(response_text, expected_label):
+    client = FakeOpenRouterClient(response_text)
     classifier = DomainClassifier(client)
 
     result = await classifier.classify("How do transformers work?")
 
-    assert result == "computer_science"
+    assert result == expected_label
     assert client.last_messages[0]["role"] == "system"
     assert "exactly one label" in client.last_messages[0]["content"].lower()
 
 
 @pytest.mark.asyncio
 async def test_classify_falls_back_to_general_for_invalid_output():
-    client = FakeOpenRouterClient("unknown-domain")
+    client = FakeOpenRouterClient("biomedical or legal")
     classifier = DomainClassifier(client)
 
     result = await classifier.classify("What is the best cuisine?")
