@@ -12,6 +12,9 @@ class ResearchAgent:
         self.wiki = WikipediaClient()
         self.arxiv = ArXivClient()
         self.web = WebSearchClient()
+        self.pubmed = None
+        self.ieee = None
+        self.semantic_scholar = None
         
         self.tools = [
             {
@@ -87,6 +90,11 @@ class ResearchAgent:
                 getattr(result, "title", ""),
                 getattr(result, "content", getattr(result, "summary", getattr(result, "body", ""))),
             )
+
+        async def _search_optional(client, query: str):
+            if client is None:
+                return []
+            return await client.search(query)
         
         for _ in range(max_iterations):
             response = await self.llm.generate_response(messages=messages, tools=self.tools)
@@ -127,6 +135,24 @@ class ResearchAgent:
                     for r in results:
                         source, url, title, content = _result_fields(r)
                         documents.append(Document(source=source or "web", url=url, title=title, content=content))
+                elif func_name == "search_pubmed":
+                    results = await _search_optional(self.pubmed, args.get("query", topic))
+                    tool_result_content = json.dumps([_document_payload(r) for r in results])
+                    for r in results:
+                        source, url, title, content = _result_fields(r)
+                        documents.append(Document(source=source or "pubmed", url=url, title=title, content=content))
+                elif func_name == "search_ieee":
+                    results = await _search_optional(self.ieee, args.get("query", topic))
+                    tool_result_content = json.dumps([_document_payload(r) for r in results])
+                    for r in results:
+                        source, url, title, content = _result_fields(r)
+                        documents.append(Document(source=source or "ieee", url=url, title=title, content=content))
+                elif func_name == "search_semantic_scholar":
+                    results = await _search_optional(self.semantic_scholar, args.get("query", topic))
+                    tool_result_content = json.dumps([_document_payload(r) for r in results])
+                    for r in results:
+                        source, url, title, content = _result_fields(r)
+                        documents.append(Document(source=source or "semantic_scholar", url=url, title=title, content=content))
                 elif func_name == "finish_research":
                     all_finished = True
                     tool_result_content = "Research successfully concluded. Proceed to generation."

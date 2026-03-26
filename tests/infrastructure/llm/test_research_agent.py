@@ -76,3 +76,22 @@ async def test_research_agent_consumes_normalized_documents():
 
     assert [doc.source for doc in documents] == ["wikipedia"]
     assert documents[0].content == "Wiki content"
+
+
+class FutureToolLLM:
+    async def generate_response(self, messages, tools):
+        return FakeResponse(
+            [
+                FakeToolCall("1", "search_pubmed", "{\"query\": \"cancer\"}"),
+                FakeToolCall("2", "finish_research", "{\"summary\": \"done\"}"),
+            ]
+        )
+
+
+@pytest.mark.asyncio
+async def test_research_agent_ignores_future_tools_without_clients():
+    agent = ResearchAgent(FutureToolLLM())
+
+    documents = await agent.run("cancer", max_iterations=1)
+
+    assert documents == []
