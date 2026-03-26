@@ -85,10 +85,23 @@ async def test_arxiv_client_returns_documents(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_arxiv_client_swallows_search_construction_errors(monkeypatch):
+    monkeypatch.setattr(
+        "src.meridian.infrastructure.external_apis.arxiv_client.arxiv.Search",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+
+    client = ArXivClient()
+    results = await client.search("quantum")
+
+    assert results == []
+
+
+@pytest.mark.asyncio
 async def test_wikipedia_client_returns_documents(monkeypatch):
     class FakePage:
         title = "Wikipedia Title"
-        summary = "Wikipedia summary text"
+        summary = "Wikipedia summary text" + ("x" * 1200)
         url = "https://en.wikipedia.org/wiki/Fake"
 
     monkeypatch.setattr(
@@ -107,7 +120,8 @@ async def test_wikipedia_client_returns_documents(monkeypatch):
     assert isinstance(results[0], Document)
     assert results[0].source == "wikipedia"
     assert results[0].title == "Wikipedia Title"
-    assert results[0].content == "Wikipedia summary text"
+    assert len(results[0].content) == 1000
+    assert results[0].content == FakePage.summary[:1000]
     assert results[0].url == "https://en.wikipedia.org/wiki/Fake"
 
 

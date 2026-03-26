@@ -71,6 +71,22 @@ class ResearchAgent:
         ]
         
         documents = []
+
+        def _document_payload(result: Document) -> dict:
+            if hasattr(result, "model_dump"):
+                return result.model_dump(mode="json")
+            return result.dict()
+
+        def _result_fields(result):
+            if isinstance(result, Document):
+                return result.source, result.url, result.title, result.content
+
+            return (
+                getattr(result, "source", ""),
+                getattr(result, "url", ""),
+                getattr(result, "title", ""),
+                getattr(result, "content", getattr(result, "summary", getattr(result, "body", ""))),
+            )
         
         for _ in range(max_iterations):
             response = await self.llm.generate_response(messages=messages, tools=self.tools)
@@ -95,19 +111,22 @@ class ResearchAgent:
                 
                 if func_name == "search_wikipedia":
                     results = await self.wiki.search(args.get("query", topic))
-                    tool_result_content = json.dumps([r.dict() for r in results])
+                    tool_result_content = json.dumps([_document_payload(r) for r in results])
                     for r in results:
-                        documents.append(Document(source="wikipedia", url=r.url, title=r.title, content=r.summary))
+                        source, url, title, content = _result_fields(r)
+                        documents.append(Document(source=source or "wikipedia", url=url, title=title, content=content))
                 elif func_name == "search_arxiv":
                     results = await self.arxiv.search(args.get("query", topic))
-                    tool_result_content = json.dumps([r.dict() for r in results])
+                    tool_result_content = json.dumps([_document_payload(r) for r in results])
                     for r in results:
-                        documents.append(Document(source="arxiv", url=r.url, title=r.title, content=r.summary))
+                        source, url, title, content = _result_fields(r)
+                        documents.append(Document(source=source or "arxiv", url=url, title=title, content=content))
                 elif func_name == "search_web":
                     results = await self.web.search(args.get("query", topic))
-                    tool_result_content = json.dumps([r.dict() for r in results])
+                    tool_result_content = json.dumps([_document_payload(r) for r in results])
                     for r in results:
-                        documents.append(Document(source="web", url=r.url, title=r.title, content=r.body))
+                        source, url, title, content = _result_fields(r)
+                        documents.append(Document(source=source or "web", url=url, title=title, content=content))
                 elif func_name == "finish_research":
                     all_finished = True
                     tool_result_content = "Research successfully concluded. Proceed to generation."

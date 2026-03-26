@@ -12,7 +12,7 @@ class WikipediaClient:
                     docs.append(Document(
                         source="wikipedia",
                         title=page.title,
-                        content=page.summary,
+                        content=page.summary[:1000],
                         url=page.url,
                     ))
                 except wikipedia.exceptions.DisambiguationError:

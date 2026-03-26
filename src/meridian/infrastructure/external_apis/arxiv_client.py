@@ -3,14 +3,14 @@ from src.meridian.domain.entities import Document
 
 class ArXivClient:
     async def search(self, query: str, limit: int = 3) -> list[Document]:
-        search = arxiv.Search(
-            query=query,
-            max_results=limit,
-            sort_by=arxiv.SortCriterion.Relevance
-        )
-        
-        client = arxiv.Client()
         try:
+            search = arxiv.Search(
+                query=query,
+                max_results=limit,
+                sort_by=arxiv.SortCriterion.Relevance
+            )
+
+            client = arxiv.Client()
             return [
                 Document(
                     source="arxiv",
