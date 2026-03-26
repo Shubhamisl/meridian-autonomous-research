@@ -3,11 +3,19 @@ from src.meridian.interfaces.workers.app import celery_app
 
 async def _run_job_async(job_id: str):
     from src.meridian.application.pipeline.orchestrator import PipelineOrchestrator
+    from src.meridian.application.pipeline.domain_classifier import DomainClassifier
+    from src.meridian.application.pipeline.source_router import SourceRouter
     from src.meridian.infrastructure.database.session import SessionLocal
     from src.meridian.infrastructure.database.sqlite_repositories import (
         SQLiteResearchJobRepository,
         SQLiteResearchReportRepository,
     )
+    from src.meridian.infrastructure.external_apis.arxiv_client import ArXivClient
+    from src.meridian.infrastructure.external_apis.ieee_client import IEEEClient
+    from src.meridian.infrastructure.external_apis.pubmed_client import PubMedClient
+    from src.meridian.infrastructure.external_apis.semantic_scholar_client import SemanticScholarClient
+    from src.meridian.infrastructure.external_apis.web_search_client import WebSearchClient
+    from src.meridian.infrastructure.external_apis.wikipedia_client import WikipediaClient
     from src.meridian.infrastructure.llm.openrouter_client import OpenRouterClient
     from src.meridian.infrastructure.llm.research_agent import ResearchAgent
     from src.meridian.infrastructure.llm.synthesizer import ReportSynthesizer
@@ -18,7 +26,25 @@ async def _run_job_async(job_id: str):
         report_repo = SQLiteResearchReportRepository(session)
         chunk_repo = ChromaChunkRepository()
         openrouter = OpenRouterClient()
-        agent = ResearchAgent(openrouter)
+        domain_classifier = DomainClassifier(openrouter)
+        source_router = SourceRouter()
+        wikipedia_client = WikipediaClient()
+        arxiv_client = ArXivClient()
+        web_search_client = WebSearchClient()
+        pubmed_client = PubMedClient()
+        ieee_client = IEEEClient()
+        semantic_scholar_client = SemanticScholarClient()
+        agent = ResearchAgent(
+            openrouter,
+            domain_classifier=domain_classifier,
+            source_router=source_router,
+            wikipedia_client=wikipedia_client,
+            arxiv_client=arxiv_client,
+            web_search_client=web_search_client,
+            pubmed_client=pubmed_client,
+            ieee_client=ieee_client,
+            semantic_scholar_client=semantic_scholar_client,
+        )
         synthesizer = ReportSynthesizer(openrouter)
 
         orchestrator = PipelineOrchestrator(
