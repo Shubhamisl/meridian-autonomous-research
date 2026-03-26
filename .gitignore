@@ -1,0 +1,27 @@
+# Environment / secrets
+.env
+.env.local
+.env.*.local
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Databases (local runtime data)
+*.db
+chroma_db/
+
+# Debug artifacts
+debug_*.py
+debug_*.txt
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

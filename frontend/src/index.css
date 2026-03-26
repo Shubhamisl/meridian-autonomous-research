@@ -1,0 +1,56 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-background text-zinc-100 min-h-screen antialiased selection:bg-accent selection:text-white;
+    background-image: 
+      radial-gradient(circle at 15% 50%, rgba(76, 29, 149, 0.15) 0%, transparent 50%),
+      radial-gradient(circle at 85% 30%, rgba(30, 58, 138, 0.15) 0%, transparent 50%);
+    background-attachment: fixed;
+  }
+}
+
+@layer components {
+  /* High-end Glassmorphism Utilities */
+  .glass {
+    @apply bg-surface backdrop-blur-xl border border-border shadow-[0_8px_32px_0_rgba(0,0,0,0.36)];
+  }
+  
+  .glass-panel {
+    @apply bg-surface backdrop-blur-2xl border border-border shadow-[inset_0_1px_1px_rgba(255,255,255,0.05)];
+  }
+
+  .glass-button {
+    @apply bg-surface hover:bg-surface-hover backdrop-blur-md border border-border transition-all duration-300 shadow-[0_4px_12px_rgba(0,0,0,0.2)];
+  }
+
+  .glass-input {
+    @apply bg-black/20 backdrop-blur-md border border-border text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent transition-all duration-300;
+  }
+  
+  .text-gradient {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-zinc-100 via-zinc-300 to-zinc-500;
+  }
+  
+  .text-gradient-accent {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-accent via-fuchsia-500 to-accent-light;
+  }
+
+  .glass-card {
+    @apply bg-white/[0.04] backdrop-blur-xl border border-white/[0.06] shadow-[0_8px_32px_0_rgba(0,0,0,0.36)];
+  }
+}
+
+/* Masonry grid layout */
+.masonry-grid {
+  display: flex;
+  margin-left: -16px;
+  width: auto;
+}
+
+.masonry-grid-column {
+  padding-left: 16px;
+  background-clip: padding-box;
+}
