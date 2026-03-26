@@ -6,14 +6,17 @@ from src.meridian.domain.entities import Document
 
 
 class FakeResponse:
-    def __init__(self, text="", json_data=None):
+    def __init__(self, text="", json_data=None, error=None):
         self.text = text
         self._json_data = json_data
+        self._error = error
 
     def json(self):
         return self._json_data
 
     def raise_for_status(self):
+        if self._error:
+            raise self._error
         return None
 
 
@@ -85,6 +88,33 @@ async def test_ieee_returns_empty_list_and_logs_when_key_missing(monkeypatch, ca
 
 
 @pytest.mark.asyncio
+async def test_ieee_returns_documents_from_mocked_api(monkeypatch):
+    from src.meridian.infrastructure.external_apis.ieee_client import IEEEClient
+
+    payload = {
+        "articles": [
+            {
+                "title": "IEEE Title",
+                "abstract": "IEEE abstract text",
+                "html_url": "https://example.com/ieee",
+            }
+        ]
+    }
+    client = FakeAsyncClient([FakeResponse(json_data=payload)])
+    monkeypatch.setenv("IEEE_API_KEY", "test-key")
+    monkeypatch.setattr("src.meridian.infrastructure.external_apis.ieee_client.httpx.AsyncClient", lambda: client)
+
+    results = await IEEEClient().search("distributed systems")
+
+    assert len(results) == 1
+    assert isinstance(results[0], Document)
+    assert results[0].source == "ieee"
+    assert results[0].title == "IEEE Title"
+    assert results[0].content == "IEEE abstract text"
+    assert results[0].url == "https://example.com/ieee"
+
+
+@pytest.mark.asyncio
 async def test_semantic_scholar_returns_documents_from_mocked_api(monkeypatch):
     from src.meridian.infrastructure.external_apis.semantic_scholar_client import SemanticScholarClient
 
@@ -124,12 +154,10 @@ async def test_pubmed_returns_empty_list_on_fetch_failure(monkeypatch):
       </IdList>
     </eSearchResult>
     """
-    client = FakeAsyncClient([FakeResponse(text=esearch_xml)])
-
-    async def failing_get(url, params=None, timeout=None):
-        raise RuntimeError("boom")
-
-    client.get = failing_get
+    client = FakeAsyncClient([
+        FakeResponse(text=esearch_xml),
+        FakeResponse(error=RuntimeError("boom")),
+    ])
     monkeypatch.setattr("src.meridian.infrastructure.external_apis.pubmed_client.httpx.AsyncClient", lambda: client)
 
     results = await PubMedClient().search("cancer")
