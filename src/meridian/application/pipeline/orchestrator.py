@@ -1,5 +1,6 @@
 import logging
 
+from src.meridian.application.pipeline.format_selector import FormatSelector
 from src.meridian.domain.repositories import ResearchJobRepository, ResearchReportRepository, ChunkRepository
 from src.meridian.infrastructure.llm.research_agent import ResearchAgent
 from src.meridian.infrastructure.llm.synthesizer import ReportSynthesizer
@@ -16,6 +17,7 @@ class PipelineOrchestrator:
         agent: ResearchAgent,
         synthesizer: ReportSynthesizer,
         chunking_service: ChunkingService,
+        format_selector: FormatSelector,
     ):
         self.job_repo = job_repo
         self.report_repo = report_repo
@@ -23,6 +25,7 @@ class PipelineOrchestrator:
         self.agent = agent
         self.synthesizer = synthesizer
         self.chunking_service = chunking_service
+        self.format_selector = format_selector
 
     async def run_pipeline(self, job_id: str):
         job = await self.job_repo.get(job_id)
@@ -57,7 +60,16 @@ class PipelineOrchestrator:
             if not retrieved_chunks:
                 retrieved_chunks = all_chunks[:10]
 
-            report = await self.synthesizer.synthesize(job_id, job.query, retrieved_chunks)
+            domain = getattr(self.agent, "domain", "general")
+            format_label = await self.format_selector.select(domain, job.query)
+            logger.info("Selected report format: %s", format_label)
+
+            report = await self.synthesizer.synthesize(
+                job_id,
+                job.query,
+                retrieved_chunks,
+                format_label=format_label,
+            )
 
             await self.report_repo.save(report)
             

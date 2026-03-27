@@ -42,6 +42,7 @@ class FakeAgent:
     def __init__(self, documents):
         self.documents = documents
         self.calls = []
+        self.domain = "computer_science"
 
     async def run(self, topic, max_iterations=5):
         self.calls.append(topic)
@@ -49,7 +50,18 @@ class FakeAgent:
 
 
 class FakeSynthesizer:
-    async def synthesize(self, job_id, query, chunks):
+    def __init__(self):
+        self.calls = []
+
+    async def synthesize(self, job_id, query, chunks, format_label):
+        self.calls.append(
+            {
+                "job_id": job_id,
+                "query": query,
+                "chunks": chunks,
+                "format_label": format_label,
+            }
+        )
         return ResearchReport(job_id=job_id, query=query, markdown_content="report")
 
 
@@ -63,8 +75,18 @@ class FakeChunkingService:
         return self.chunks
 
 
+class FakeFormatSelector:
+    def __init__(self, label="osint"):
+        self.label = label
+        self.calls = []
+
+    async def select(self, domain, query):
+        self.calls.append((domain, query))
+        return self.label
+
+
 @pytest.mark.asyncio
-async def test_run_pipeline_uses_chunking_service_and_logs_document_summary(monkeypatch, caplog):
+async def test_run_pipeline_uses_chunking_service_logs_document_summary_and_passes_format_label(monkeypatch, caplog):
     fake_research_agent_module = types.ModuleType("src.meridian.infrastructure.llm.research_agent")
     fake_research_agent_module.ResearchAgent = object
     fake_synthesizer_module = types.ModuleType("src.meridian.infrastructure.llm.synthesizer")
@@ -84,6 +106,7 @@ async def test_run_pipeline_uses_chunking_service_and_logs_document_summary(monk
     agent = FakeAgent([document])
     chunking_service = FakeChunkingService([chunk])
     synthesizer = FakeSynthesizer()
+    format_selector = FakeFormatSelector("osint")
 
     monkeypatch.setattr(
         "src.meridian.application.pipeline.orchestrator.chunk_document",
@@ -98,6 +121,7 @@ async def test_run_pipeline_uses_chunking_service_and_logs_document_summary(monk
         agent=agent,
         synthesizer=synthesizer,
         chunking_service=chunking_service,
+        format_selector=format_selector,
     )
 
     with caplog.at_level("INFO"):
@@ -107,12 +131,15 @@ async def test_run_pipeline_uses_chunking_service_and_logs_document_summary(monk
     assert chunking_service.calls[0] == [document]
     assert chunk_repo.saved_chunks == [chunk]
     assert len(report_repo.saved_reports) == 1
+    assert format_selector.calls == [("computer_science", job.query)]
+    assert synthesizer.calls[0]["format_label"] == "osint"
     assert [
         record.message
         for record in caplog.records
         if record.levelname == "INFO"
     ] == [
-        f"Chunked document summary: source=web title={'T' * 60} credibility_score=0.87"
+        f"Chunked document summary: source=web title={'T' * 60} credibility_score=0.87",
+        "Selected report format: osint",
     ]
 
 
@@ -136,6 +163,7 @@ async def test_run_pipeline_logs_a_summary_for_empty_document(monkeypatch, caplo
     agent = FakeAgent([document])
     chunking_service = FakeChunkingService([])
     synthesizer = FakeSynthesizer()
+    format_selector = FakeFormatSelector("general")
 
     orchestrator = PipelineOrchestrator(
         job_repo=job_repo,
@@ -144,6 +172,7 @@ async def test_run_pipeline_logs_a_summary_for_empty_document(monkeypatch, caplo
         agent=agent,
         synthesizer=synthesizer,
         chunking_service=chunking_service,
+        format_selector=format_selector,
     )
 
     with caplog.at_level("INFO"):
@@ -154,5 +183,45 @@ async def test_run_pipeline_logs_a_summary_for_empty_document(monkeypatch, caplo
         for record in caplog.records
         if record.levelname == "INFO"
     ] == [
-        "Chunked document summary: source=web title=Empty credibility_score=0.50"
+        "Chunked document summary: source=web title=Empty credibility_score=0.50",
+        "Selected report format: general",
     ]
+
+
+@pytest.mark.asyncio
+async def test_run_pipeline_uses_general_when_agent_has_no_domain(monkeypatch):
+    fake_research_agent_module = types.ModuleType("src.meridian.infrastructure.llm.research_agent")
+    fake_research_agent_module.ResearchAgent = object
+    fake_synthesizer_module = types.ModuleType("src.meridian.infrastructure.llm.synthesizer")
+    fake_synthesizer_module.ReportSynthesizer = object
+    monkeypatch.setitem(sys.modules, "src.meridian.infrastructure.llm.research_agent", fake_research_agent_module)
+    monkeypatch.setitem(sys.modules, "src.meridian.infrastructure.llm.synthesizer", fake_synthesizer_module)
+
+    orchestrator_module = importlib.import_module("src.meridian.application.pipeline.orchestrator")
+    PipelineOrchestrator = orchestrator_module.PipelineOrchestrator
+
+    job = ResearchJob(query="General topic")
+    document = Document(source="web", url="https://example.com", title="T", content="content")
+    chunk = Chunk(document_id=document.id, content="service chunk", credibility_score=0.87)
+    job_repo = FakeJobRepo(job)
+    report_repo = FakeReportRepo()
+    chunk_repo = FakeChunkRepo()
+    agent = FakeAgent([document])
+    delattr(agent, "domain")
+    chunking_service = FakeChunkingService([chunk])
+    synthesizer = FakeSynthesizer()
+    format_selector = FakeFormatSelector("general")
+
+    orchestrator = PipelineOrchestrator(
+        job_repo=job_repo,
+        report_repo=report_repo,
+        chunk_repo=chunk_repo,
+        agent=agent,
+        synthesizer=synthesizer,
+        chunking_service=chunking_service,
+        format_selector=format_selector,
+    )
+
+    await orchestrator.run_pipeline(job.id)
+
+    assert format_selector.calls == [("general", job.query)]
