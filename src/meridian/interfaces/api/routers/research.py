@@ -94,23 +94,14 @@ def build_explainability_payload(metadata: dict) -> ExplainabilityPayload:
             }
         )
 
-    if not normalized_refinements:
-        query = metadata.get("query")
-        if isinstance(query, str) and query:
-            normalized_refinements = [
-                {
-                    "source": source,
-                    "raw_query": query,
-                    "enriched_query": query,
-                }
-                for source in active_sources
-                if isinstance(source, str) and source
-            ]
-
     return ExplainabilityPayload(
         active_sources=[source for source in active_sources if isinstance(source, str) and source],
         query_refinements=normalized_refinements,
     )
+
+
+def _normalize_pipeline_phase(candidate: object) -> str | None:
+    return candidate if isinstance(candidate, str) and candidate in PHASES else None
 
 @router.post("/", response_model=ResearchResponse)
 async def create_research(
@@ -187,14 +178,13 @@ async def get_research_report(
     current_phase = None
     phases = list(PHASES)
     if isinstance(pipeline_metadata, dict):
-        current_phase = pipeline_metadata.get("current_phase")
+        current_phase = _normalize_pipeline_phase(pipeline_metadata.get("current_phase"))
         stored_phases = pipeline_metadata.get("phases")
         if isinstance(stored_phases, list) and all(isinstance(phase, str) for phase in stored_phases):
             phases = stored_phases
 
-    if not isinstance(current_phase, str) or not current_phase:
-        raw_phase = workspace_metadata.get("current_phase")
-        current_phase = raw_phase if isinstance(raw_phase, str) and raw_phase else getattr(job.status, "value", str(job.status))
+    if current_phase is None:
+        current_phase = _normalize_pipeline_phase(workspace_metadata.get("current_phase"))
 
     return ResearchWorkspaceResponse(
         id=report.id,

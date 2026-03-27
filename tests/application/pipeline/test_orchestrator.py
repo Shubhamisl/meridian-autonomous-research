@@ -277,10 +277,4 @@ async def test_run_pipeline_logs_and_persists_workspace_metadata(monkeypatch, ca
     assert report.metadata["format_label"] == "osint"
     assert report.metadata["pipeline"]["current_phase"] == "synthesize"
     assert report.metadata["active_sources"] == ["arxiv"]
-    assert report.metadata["query_refinements"] == [
-        {
-            "source": "arxiv",
-            "raw_query": "threat actor report",
-            "enriched_query": "threat actor report",
-        }
-    ]
+    assert report.metadata["query_refinements"] == []

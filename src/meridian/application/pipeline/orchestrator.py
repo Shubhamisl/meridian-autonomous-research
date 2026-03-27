@@ -59,16 +59,7 @@ def _derive_query_refinements(query: str, sources: list[str], recorded: Any) -> 
     normalized = _normalize_query_refinements(recorded)
     if normalized:
         return normalized
-    if not isinstance(query, str) or not query:
-        return []
-    return [
-        {
-            "source": source,
-            "raw_query": query,
-            "enriched_query": query,
-        }
-        for source in _unique_in_order(sources)
-    ]
+    return []
 
 class PipelineOrchestrator:
     def __init__(

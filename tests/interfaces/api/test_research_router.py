@@ -118,8 +118,81 @@ async def test_get_research_report_returns_workspace_metadata(client):
     assert payload["pipeline"]["current_phase"] == "synthesize"
     assert payload["evidence"][0]["source"] == "arxiv"
     assert payload["explainability"]["active_sources"] == ["arxiv", "ieee", "web"]
-    assert payload["explainability"]["query_refinements"][0] == {
-        "source": "arxiv",
-        "raw_query": "threat actor report",
-        "enriched_query": "threat actor report",
-    }
+    assert payload["explainability"]["query_refinements"] == []
+
+
+@pytest.mark.asyncio
+async def test_get_research_report_does_not_use_job_status_as_pipeline_phase(client):
+    response = await client.get("/research/job-123/report", headers=auth_headers())
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["pipeline"]["current_phase"] == "synthesize"
+
+
+@pytest.mark.asyncio
+async def test_get_research_report_returns_null_phase_when_workspace_phase_is_unavailable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    db_path = tmp_path / "research-router-missing-phase.db"
+    engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}")
+    session_factory = async_sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    async def override_get_db():
+        async with session_factory() as session:
+            yield session
+
+    async def override_get_current_user():
+        return {"uid": "user-123", "email": "user@example.com"}
+
+    monkeypatch.setattr(research, "ChromaChunkRepository", FakeChunkRepository, raising=False)
+    app.dependency_overrides[research.get_db] = override_get_db
+    app.dependency_overrides[get_current_user] = override_get_current_user
+
+    async with session_factory() as session:
+        session.add(
+            DBResearchJob(
+                id="job-no-phase",
+                user_id="user-123",
+                query="threat actor report",
+                status="completed",
+                created_at=datetime(2024, 1, 1, 0, 0, 0),
+                completed_at=datetime(2024, 1, 1, 0, 30, 0),
+                error_message=None,
+                workspace_metadata=json.dumps(
+                    {
+                        "domain": "computer_science",
+                        "format_label": "osint",
+                        "active_sources": ["arxiv"],
+                    }
+                ),
+            )
+        )
+        session.add(
+            DBResearchReport(
+                id="report-no-phase",
+                job_id="job-no-phase",
+                query="threat actor report",
+                markdown_content="# Threat Actor Report",
+                created_at=datetime(2024, 1, 1, 0, 0, 0),
+                workspace_metadata=json.dumps(
+                    {
+                        "domain": "computer_science",
+                        "format_label": "osint",
+                        "active_sources": ["arxiv"],
+                    }
+                ),
+            )
+        )
+        await session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as async_client:
+        response = await async_client.get("/research/job-no-phase/report", headers=auth_headers())
+
+    app.dependency_overrides.clear()
+    await engine.dispose()
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["pipeline"]["current_phase"] is None
