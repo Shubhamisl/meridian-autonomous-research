@@ -10,34 +10,61 @@ except ImportError:
     credentials = None
     auth = None
 
+
+_firebase_admin_service_account_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+_firebase_admin_service_account_available = bool(
+    _firebase_admin_service_account_path
+    and os.path.exists(_firebase_admin_service_account_path)
+)
+_firebase_admin_initialization_succeeded = False
+_firebase_admin_initialization_error = None
+
+
 def describe_firebase_setup() -> dict[str, object]:
-    cred_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-    has_service_account = bool(cred_path and os.path.exists(cred_path))
+    adc_may_be_used = bool(
+        firebase_admin is not None and not _firebase_admin_service_account_available
+    )
     return {
         "auth_sdk_available": auth is not None,
-        "admin_credentials_available": has_service_account,
+        "service_account_credentials_available": _firebase_admin_service_account_available,
+        "adc_may_be_used": adc_may_be_used,
+        "admin_initialization_succeeded": _firebase_admin_initialization_succeeded,
+        "admin_credentials_available": _firebase_admin_initialization_succeeded,
         "message": (
             "Firebase Admin is configured."
-            if has_service_account
-            else "Firebase Admin requires GOOGLE_APPLICATION_CREDENTIALS or valid ADC."
+            if _firebase_admin_initialization_succeeded
+            else (
+                "Firebase Admin could not initialize with the configured service account."
+                if _firebase_admin_service_account_available
+                else "Firebase Admin requires GOOGLE_APPLICATION_CREDENTIALS or valid ADC."
+            )
         ),
     }
 
 
 def _initialize_firebase_admin() -> None:
+    global _firebase_admin_initialization_succeeded
+    global _firebase_admin_initialization_error
+
     if firebase_admin is None or firebase_admin._apps:
+        _firebase_admin_initialization_succeeded = firebase_admin is not None and bool(
+            firebase_admin._apps
+        )
         return
 
-    cred_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
     try:
-        if cred_path and os.path.exists(cred_path):
-            cred = credentials.Certificate(cred_path)
+        if _firebase_admin_service_account_available:
+            cred = credentials.Certificate(_firebase_admin_service_account_path)
             firebase_admin.initialize_app(cred)
         else:
             # Falls back to Application Default Credentials.
             firebase_admin.initialize_app()
+        _firebase_admin_initialization_succeeded = True
+        _firebase_admin_initialization_error = None
     except Exception:
         # Leave Firebase Admin uninitialized so runtime checks can report setup issues.
+        _firebase_admin_initialization_succeeded = False
+        _firebase_admin_initialization_error = "Firebase Admin failed to initialize."
         return
 
 
@@ -53,6 +80,11 @@ async def get_current_user(
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Firebase auth is not available in this environment",
+        )
+    if not _firebase_admin_initialization_succeeded:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Firebase Admin is not initialized in this environment",
         )
     token = credentials.credentials
     try:
