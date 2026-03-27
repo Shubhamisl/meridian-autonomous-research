@@ -35,6 +35,23 @@ class FakeChunkRepository:
         ]
 
 
+class ZeroCredibilityChunkRepository:
+    async def search(self, job_id: str, query: str, top_k: int = 5) -> list[Chunk]:
+        return [
+            Chunk(
+                document_id="doc-2",
+                content="zero credibility snippet",
+                metadata={
+                    "source": "web",
+                    "title": "Zero Credibility Source",
+                    "url": "https://example.com/zero",
+                    "snippet": "Zero credibility evidence",
+                },
+                credibility_score=0.0,
+            )
+        ]
+
+
 @pytest_asyncio.fixture
 async def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     db_path = tmp_path / "research-router.db"
@@ -196,3 +213,14 @@ async def test_get_research_report_returns_null_phase_when_workspace_phase_is_un
     assert response.status_code == 200
     payload = response.json()
     assert payload["pipeline"]["current_phase"] is None
+
+
+@pytest.mark.asyncio
+async def test_get_research_report_preserves_zero_credibility_scores(client, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(research, "ChromaChunkRepository", ZeroCredibilityChunkRepository, raising=False)
+
+    response = await client.get("/research/job-123/report", headers=auth_headers())
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["evidence"][0]["credibility_score"] == 0.0

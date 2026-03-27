@@ -11,11 +11,6 @@ logger = logging.getLogger(__name__)
 PIPELINE_PHASES = ["research", "chunk", "retrieve", "synthesize"]
 
 
-def _attach_metadata(model: Any, metadata: dict[str, Any]) -> Any:
-    object.__setattr__(model, "metadata", metadata)
-    return model
-
-
 def _update_pipeline_phase(metadata: dict[str, Any], phase: str) -> None:
     metadata["current_phase"] = phase
     metadata["pipeline"] = {"current_phase": phase, "phases": list(PIPELINE_PHASES)}
@@ -61,6 +56,21 @@ def _derive_query_refinements(query: str, sources: list[str], recorded: Any) -> 
         return normalized
     return []
 
+
+async def _load_workspace_metadata(repository: object, entity_id: str) -> dict[str, Any]:
+    loader = getattr(repository, "get_workspace_metadata", None)
+    if not callable(loader):
+        return {}
+
+    metadata = await loader(entity_id)
+    return metadata if isinstance(metadata, dict) else {}
+
+
+async def _save_workspace_metadata(repository: object, entity_id: str, metadata: dict[str, Any]) -> None:
+    saver = getattr(repository, "save_workspace_metadata", None)
+    if callable(saver):
+        await saver(entity_id, dict(metadata))
+
 class PipelineOrchestrator:
     def __init__(
         self,
@@ -85,12 +95,12 @@ class PipelineOrchestrator:
         if not job:
             return
 
-        workspace_metadata = dict(getattr(job, "metadata", {}) or {})
+        workspace_metadata = await _load_workspace_metadata(self.job_repo, job.id)
         try:
             _update_pipeline_phase(workspace_metadata, "research")
             job = job.start()
-            _attach_metadata(job, workspace_metadata)
             await self.job_repo.save(job)
+            await _save_workspace_metadata(self.job_repo, job.id, workspace_metadata)
 
             # Phase 1: Research Agent loop
             documents = await self.agent.run(topic=job.query)
@@ -141,16 +151,15 @@ class PipelineOrchestrator:
                 retrieved_chunks,
                 format_label=format_label,
             )
-            _attach_metadata(report, dict(workspace_metadata))
-
             await self.report_repo.save(report)
+            await _save_workspace_metadata(self.report_repo, report.id, workspace_metadata)
             
             job = job.complete()
-            _attach_metadata(job, workspace_metadata)
             await self.job_repo.save(job)
+            await _save_workspace_metadata(self.job_repo, job.id, workspace_metadata)
             return report
 
         except Exception as e:
             job = job.fail(error_message=str(e))
-            _attach_metadata(job, workspace_metadata)
             await self.job_repo.save(job)
+            await _save_workspace_metadata(self.job_repo, job.id, workspace_metadata)

@@ -37,9 +37,23 @@ class ResearchResponse(BaseModel):
     query: str | None = None
 
 
-def _workspace_metadata(entity: object | None) -> dict:
-    metadata = getattr(entity, "metadata", {}) if entity else {}
+async def _workspace_metadata(repository: object, entity_id: str | None) -> dict:
+    if not entity_id:
+        return {}
+
+    getter = getattr(repository, "get_workspace_metadata", None)
+    if not callable(getter):
+        return {}
+
+    metadata = await getter(entity_id)
     return metadata if isinstance(metadata, dict) else {}
+
+
+def _chunk_credibility_score(chunk: object) -> float:
+    raw_score = getattr(chunk, "credibility_score", None)
+    if raw_score is None:
+        return 0.5
+    return float(raw_score)
 
 
 def build_evidence_items(chunks: list) -> list[EvidenceItem]:
@@ -60,7 +74,7 @@ def build_evidence_items(chunks: list) -> list[EvidenceItem]:
                 source=source,
                 title=title,
                 url=url,
-                credibility_score=float(getattr(chunk, "credibility_score", 0.5) or 0.5),
+                credibility_score=_chunk_credibility_score(chunk),
                 snippet=chunk_metadata.get("snippet") or getattr(chunk, "content", None),
             )
         )
@@ -164,7 +178,10 @@ async def get_research_report(
     if not job or not report:
         raise HTTPException(status_code=404, detail="Report not ready yet or job failed.")
 
-    workspace_metadata = {**_workspace_metadata(job), **_workspace_metadata(report)}
+    workspace_metadata = {
+        **(await _workspace_metadata(job_repo, job.id)),
+        **(await _workspace_metadata(report_repo, report.id)),
+    }
     workspace_metadata.setdefault("query", report.query)
     evidence_chunks = []
     if ChromaChunkRepository is not None:

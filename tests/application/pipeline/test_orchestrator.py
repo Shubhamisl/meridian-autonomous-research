@@ -11,6 +11,8 @@ class FakeJobRepo:
     def __init__(self, job):
         self.job = job
         self.saved_jobs = []
+        self.metadata_by_id = {}
+        self.saved_metadata = []
 
     async def get(self, job_id):
         return self.job
@@ -19,13 +21,29 @@ class FakeJobRepo:
         self.job = job
         self.saved_jobs.append(job)
 
+    async def get_workspace_metadata(self, job_id):
+        return dict(self.metadata_by_id.get(job_id, {}))
+
+    async def save_workspace_metadata(self, job_id, metadata):
+        self.metadata_by_id[job_id] = dict(metadata)
+        self.saved_metadata.append((job_id, dict(metadata)))
+
 
 class FakeReportRepo:
     def __init__(self):
         self.saved_reports = []
+        self.metadata_by_id = {}
+        self.saved_metadata = []
 
     async def save(self, report):
         self.saved_reports.append(report)
+
+    async def get_workspace_metadata(self, report_id):
+        return dict(self.metadata_by_id.get(report_id, {}))
+
+    async def save_workspace_metadata(self, report_id, metadata):
+        self.metadata_by_id[report_id] = dict(metadata)
+        self.saved_metadata.append((report_id, dict(metadata)))
 
 
 class FakeChunkRepo:
@@ -229,7 +247,7 @@ async def test_run_pipeline_uses_general_when_agent_has_no_domain(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_run_pipeline_logs_and_persists_workspace_metadata(monkeypatch, caplog):
+async def test_run_pipeline_persists_workspace_metadata_via_repository_helpers(monkeypatch, caplog):
     fake_research_agent_module = types.ModuleType("src.meridian.infrastructure.llm.research_agent")
     fake_research_agent_module.ResearchAgent = object
     fake_synthesizer_module = types.ModuleType("src.meridian.infrastructure.llm.synthesizer")
@@ -273,8 +291,12 @@ async def test_run_pipeline_logs_and_persists_workspace_metadata(monkeypatch, ca
     with caplog.at_level("INFO"):
         report = await orchestrator.run_pipeline(job.id)
 
-    assert report.metadata["domain"] == "computer_science"
-    assert report.metadata["format_label"] == "osint"
-    assert report.metadata["pipeline"]["current_phase"] == "synthesize"
-    assert report.metadata["active_sources"] == ["arxiv"]
-    assert report.metadata["query_refinements"] == []
+    assert not hasattr(report, "metadata")
+    assert job_repo.metadata_by_id[job.id]["domain"] == "computer_science"
+    assert job_repo.metadata_by_id[job.id]["format_label"] == "osint"
+    assert job_repo.metadata_by_id[job.id]["pipeline"]["current_phase"] == "synthesize"
+    assert job_repo.metadata_by_id[job.id]["active_sources"] == ["arxiv"]
+    assert job_repo.metadata_by_id[job.id]["query_refinements"] == []
+    assert report_repo.metadata_by_id[report.id]["domain"] == "computer_science"
+    assert report_repo.metadata_by_id[report.id]["format_label"] == "osint"
+    assert report_repo.metadata_by_id[report.id]["pipeline"]["current_phase"] == "synthesize"
