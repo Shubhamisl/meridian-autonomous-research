@@ -40,14 +40,13 @@ class PipelineOrchestrator:
             all_chunks = await self.chunking_service.chunk_documents(documents)
             for document in documents:
                 document_chunks = [chunk for chunk in all_chunks if chunk.document_id == document.id]
-                if not document_chunks:
-                    continue
+                credibility_score = document_chunks[0].credibility_score if document_chunks else 0.5
 
                 logger.info(
                     "Chunked document summary: source=%s title=%s credibility_score=%.2f",
                     document.source,
                     document.title[:60],
-                    document_chunks[0].credibility_score,
+                    credibility_score,
                 )
 
             await self.chunk_repo.save_all(job_id, all_chunks)

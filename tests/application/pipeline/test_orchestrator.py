@@ -114,3 +114,45 @@ async def test_run_pipeline_uses_chunking_service_and_logs_document_summary(monk
     ] == [
         f"Chunked document summary: source=web title={'T' * 60} credibility_score=0.87"
     ]
+
+
+@pytest.mark.asyncio
+async def test_run_pipeline_logs_a_summary_for_empty_document(monkeypatch, caplog):
+    fake_research_agent_module = types.ModuleType("src.meridian.infrastructure.llm.research_agent")
+    fake_research_agent_module.ResearchAgent = object
+    fake_synthesizer_module = types.ModuleType("src.meridian.infrastructure.llm.synthesizer")
+    fake_synthesizer_module.ReportSynthesizer = object
+    monkeypatch.setitem(sys.modules, "src.meridian.infrastructure.llm.research_agent", fake_research_agent_module)
+    monkeypatch.setitem(sys.modules, "src.meridian.infrastructure.llm.synthesizer", fake_synthesizer_module)
+
+    orchestrator_module = importlib.import_module("src.meridian.application.pipeline.orchestrator")
+    PipelineOrchestrator = orchestrator_module.PipelineOrchestrator
+
+    job = ResearchJob(query="q")
+    document = Document(source="web", url="https://example.com", title="Empty", content="")
+    job_repo = FakeJobRepo(job)
+    report_repo = FakeReportRepo()
+    chunk_repo = FakeChunkRepo()
+    agent = FakeAgent([document])
+    chunking_service = FakeChunkingService([])
+    synthesizer = FakeSynthesizer()
+
+    orchestrator = PipelineOrchestrator(
+        job_repo=job_repo,
+        report_repo=report_repo,
+        chunk_repo=chunk_repo,
+        agent=agent,
+        synthesizer=synthesizer,
+        chunking_service=chunking_service,
+    )
+
+    with caplog.at_level("INFO"):
+        await orchestrator.run_pipeline(job.id)
+
+    assert [
+        record.message
+        for record in caplog.records
+        if record.levelname == "INFO"
+    ] == [
+        "Chunked document summary: source=web title=Empty credibility_score=0.50"
+    ]
