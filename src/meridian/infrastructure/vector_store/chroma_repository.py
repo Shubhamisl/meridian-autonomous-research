@@ -1,3 +1,4 @@
+import math
 import os
 from typing import List
 
@@ -16,7 +17,8 @@ class ChromaChunkRepository(ChunkRepository):
         if raw_value is None:
             return default
         try:
-            return float(raw_value)
+            weight = float(raw_value)
+            return weight if math.isfinite(weight) else default
         except (TypeError, ValueError):
             return default
 

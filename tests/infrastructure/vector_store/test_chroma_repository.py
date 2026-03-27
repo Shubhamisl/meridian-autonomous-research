@@ -1,5 +1,6 @@
 import sys
 import types
+import math
 
 import pytest
 
@@ -133,3 +134,16 @@ async def test_search_falls_back_to_default_weights_for_invalid_env_values(monke
 
     assert [chunk.id for chunk in results] == ["chunk-b", "chunk-a"]
     assert [chunk.credibility_score for chunk in results] == [1.0, 0.0]
+
+
+def test_get_weight_rejects_non_finite_env_values(monkeypatch):
+    monkeypatch.setenv("SIMILARITY_WEIGHT", "NaN")
+    monkeypatch.setenv("CREDIBILITY_WEIGHT", "inf")
+
+    monkeypatch.setattr("src.meridian.infrastructure.vector_store.chroma_repository.chromadb.PersistentClient", lambda path: FakeClient(FakeCollection()))
+    repository = ChromaChunkRepository(persist_directory="./ignored")
+
+    assert repository._get_weight("SIMILARITY_WEIGHT", 0.7) == 0.7
+    assert repository._get_weight("CREDIBILITY_WEIGHT", 0.3) == 0.3
+    assert math.isfinite(repository._get_weight("SIMILARITY_WEIGHT", 0.7))
+    assert math.isfinite(repository._get_weight("CREDIBILITY_WEIGHT", 0.3))
