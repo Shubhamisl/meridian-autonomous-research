@@ -13,12 +13,7 @@ const researchModes = ['Biomedical', 'Intelligence', 'Market', 'Legal', 'General
 export default function AppShell({ children }: AppShellProps) {
   const { pathname } = useLocation();
   const { user, logout } = useAuth();
-
-  const navItems = [
-    { label: 'Dashboard', to: '/dashboard' },
-    { label: 'Reports', to: '/dashboard' },
-    { label: 'Activity', to: '/dashboard' },
-  ];
+  const inWorkspace = pathname.startsWith('/workspace/');
 
   return (
     <div className="min-h-screen bg-ivory text-ink">
@@ -30,10 +25,13 @@ export default function AppShell({ children }: AppShellProps) {
           </p>
         </div>
 
-        <button className="mb-8 inline-flex items-center justify-center gap-2 rounded-2xl bg-teal px-4 py-3 text-sm font-semibold text-white shadow-soft transition hover:bg-teal/90">
+        <Link
+          className="mb-8 inline-flex items-center justify-center gap-2 rounded-2xl bg-teal px-4 py-3 text-sm font-semibold text-white shadow-soft transition hover:bg-teal/90"
+          to="/dashboard"
+        >
           <SquarePen className="h-4 w-4" />
           <span>New Research</span>
-        </button>
+        </Link>
 
         <nav className="flex-1 space-y-1">
           {researchModes.map((mode) => (
@@ -65,20 +63,15 @@ export default function AppShell({ children }: AppShellProps) {
                 Meridian
               </Link>
               <nav className="hidden items-center gap-7 md:flex">
-                {navItems.map((item) => {
-                  const active = item.to === '/dashboard' && pathname === '/dashboard';
-                  return (
-                    <Link
-                      key={item.label}
-                      className={`border-b pb-1 text-sm font-medium transition ${
-                        active ? 'border-teal text-ink' : 'border-transparent text-slate/65 hover:text-ink'
-                      }`}
-                      to={item.to}
-                    >
-                      {item.label}
-                    </Link>
-                  );
-                })}
+                <Link
+                  className={`border-b pb-1 text-sm font-medium transition ${
+                    pathname === '/dashboard' ? 'border-teal text-ink' : 'border-transparent text-slate/65 hover:text-ink'
+                  }`}
+                  to="/dashboard"
+                >
+                  Dashboard
+                </Link>
+                {inWorkspace && <span className="text-sm font-medium text-slate/55">Workspace</span>}
               </nav>
             </div>
 

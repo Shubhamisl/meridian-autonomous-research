@@ -23,6 +23,7 @@ class ResearchRequest(BaseModel):
 class ResearchResponse(BaseModel):
     id: str
     status: str
+    query: str | None = None
 
 @router.post("/", response_model=ResearchResponse)
 async def create_research(
@@ -42,7 +43,7 @@ async def create_research(
          job = job.fail(error_message=str(e))
          await job_repo.save(job)
          
-    return ResearchResponse(id=job.id, status=job.status)
+    return ResearchResponse(id=job.id, status=job.status, query=job.query)
 
 @router.get("/", response_model=list[ResearchResponse])
 async def list_user_research(
@@ -56,7 +57,7 @@ async def list_user_research(
         .order_by(DBResearchJob.created_at.desc())
     )
     jobs = result.scalars().all()
-    return [ResearchResponse(id=j.id, status=j.status) for j in jobs]
+    return [ResearchResponse(id=j.id, status=j.status, query=j.query) for j in jobs]
 
 @router.get("/{job_id}", response_model=ResearchResponse)
 async def get_research_status(
@@ -69,7 +70,7 @@ async def get_research_status(
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
         
-    return ResearchResponse(id=job.id, status=job.status)
+    return ResearchResponse(id=job.id, status=job.status, query=job.query)
 
 @router.get("/{job_id}/report")
 async def get_research_report(

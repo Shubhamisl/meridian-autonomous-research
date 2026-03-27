@@ -20,7 +20,7 @@ export default function App() {
             }
           />
           <Route
-            path="/research/:jobId"
+            path="/workspace/:jobId"
             element={
               <ProtectedRoute>
                 <ResearchWorkspacePage />

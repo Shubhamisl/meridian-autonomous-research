@@ -73,7 +73,7 @@ export default function ResearchDashboardPage() {
       const created = await createResearchJob(getToken, query);
       setLocalQueries((current) => ({ ...current, [created.id]: query }));
       setJobs((current) => [{ ...created, query }, ...current]);
-      navigate(`/research/${created.id}`, { state: { query } });
+      navigate(`/workspace/${created.id}`, { state: { query } });
       setQuery('');
     } finally {
       setLoading(false);
@@ -108,7 +108,7 @@ export default function ResearchDashboardPage() {
         </div>
       </section>
 
-      <RecentResearchList jobs={displayJobs} onOpenJob={(jobId) => navigate(`/research/${jobId}`)} />
+      <RecentResearchList jobs={displayJobs} onOpenJob={(jobId) => navigate(`/workspace/${jobId}`)} />
     </AppShell>
   );
 }

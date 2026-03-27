@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useLocation, useParams } from 'react-router-dom';
 
 import EvidencePlaceholder from '../components/detail/EvidencePlaceholder';
@@ -17,20 +17,20 @@ interface WorkspaceState {
 export default function ResearchWorkspacePage() {
   const { jobId = '' } = useParams();
   const { state } = useLocation() as { state: WorkspaceState | null };
+  const initialQuery = state?.query ?? null;
   const { getToken } = useAuth();
+  const [jobQuery, setJobQuery] = useState<string | null>(initialQuery);
   const [status, setStatus] = useState('pending');
   const [report, setReport] = useState<ResearchReport | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const query = useMemo(
-    () => report?.query ?? state?.query ?? 'Research inquiry',
-    [report?.query, state?.query],
-  );
+  const query = report?.query ?? jobQuery ?? 'Research inquiry';
 
   const loadWorkspace = useCallback(async () => {
     try {
       const nextStatus = await fetchResearchStatus(getToken, jobId);
       setStatus(nextStatus.status);
+      setJobQuery(nextStatus.query ?? initialQuery);
 
       if (nextStatus.status === 'completed') {
         const nextReport = await fetchResearchReport(getToken, jobId);
@@ -45,7 +45,7 @@ export default function ResearchWorkspacePage() {
     } catch {
       setLoadError('This workspace could not be loaded right now.');
     }
-  }, [getToken, jobId]);
+  }, [getToken, initialQuery, jobId]);
 
   useEffect(() => {
     const initialLoad = window.setTimeout(() => {
