@@ -49,6 +49,18 @@ async def test_score_uses_llm_for_web_sources_with_valid_json_payload():
 
 
 @pytest.mark.asyncio
+async def test_score_returns_zero_for_valid_web_payload_with_zero_score():
+    client = FakeOpenRouterClient(['{"score": 0.0, "reason": "not credible"}'])
+    scorer = CredibilityScorer(client)
+    document = Document(source="web", url="https://example.com", title="T", content="C")
+
+    result = await scorer.score(document)
+
+    assert result == 0.0
+    assert client.calls == 1
+
+
+@pytest.mark.asyncio
 async def test_score_falls_back_to_heuristic_for_invalid_web_payload():
     client = FakeOpenRouterClient(["not json"])
     scorer = CredibilityScorer(client)

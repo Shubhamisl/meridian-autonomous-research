@@ -71,6 +71,7 @@ class CredibilityScorer:
         self.web_audits_used += 1
         try:
             response = await self.llm.generate_response(messages=self._build_messages(document))
-            return self._parse_llm_score(getattr(response, "content", "")) or heuristic
+            parsed_score = self._parse_llm_score(getattr(response, "content", ""))
+            return parsed_score if parsed_score is not None else heuristic
         except Exception:
             return heuristic
