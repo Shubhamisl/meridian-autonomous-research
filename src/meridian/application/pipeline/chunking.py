@@ -1,5 +1,12 @@
-from typing import List
+from typing import List, Protocol
+
 from src.meridian.domain.entities import Document, Chunk
+
+
+class CredibilityScorerProtocol(Protocol):
+    async def score(self, document: Document) -> float:
+        ...
+
 
 def chunk_document(document: Document, chunk_size: int = 1500, overlap: int = 200) -> List[Chunk]:
     chunks = []
@@ -22,5 +29,20 @@ def chunk_document(document: Document, chunk_size: int = 1500, overlap: int = 20
             ))
             
         start = end - overlap if end < len(text) else len(text)
-        
+
     return chunks
+
+
+class ChunkingService:
+    def __init__(self, credibility_scorer: CredibilityScorerProtocol):
+        self.credibility_scorer = credibility_scorer
+
+    async def chunk_documents(self, documents: list[Document]) -> list[Chunk]:
+        chunks: list[Chunk] = []
+        for document in documents:
+            credibility_score = await self.credibility_scorer.score(document)
+            document_chunks = chunk_document(document)
+            for chunk in document_chunks:
+                chunk.credibility_score = credibility_score
+            chunks.extend(document_chunks)
+        return chunks
