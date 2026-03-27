@@ -1,5 +1,10 @@
 import pytest
-from src.meridian.domain.entities import ResearchJob, JobStatus, ResearchReport
+from src.meridian.domain.entities import Chunk, ResearchJob, JobStatus, ResearchReport
+
+
+def test_chunk_defaults_to_neutral_credibility():
+    chunk = Chunk(document_id="doc123", content="Example chunk")
+    assert chunk.credibility_score == 0.5
 
 def test_research_job_initialization():
     job = ResearchJob(query="Quantum computing advances", status=JobStatus.PENDING)

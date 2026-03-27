@@ -16,6 +16,7 @@ class Chunk(BaseModel):
     document_id: str
     content: str
     metadata: dict = Field(default_factory=dict)
+    credibility_score: float = 0.5
 
 class Document(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
