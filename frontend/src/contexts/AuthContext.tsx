@@ -13,20 +13,71 @@ export interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
+const E2E_BYPASS_STORAGE_KEY = 'meridian:e2e-auth';
+const isE2ETestingEnabled = import.meta.env.VITE_E2E_TESTING === '1';
+
+function createE2ETestUser(): User {
+  return {
+    uid: 'e2e-user',
+    displayName: 'E2E Researcher',
+    email: 'e2e@example.com',
+    emailVerified: true,
+    isAnonymous: false,
+    phoneNumber: null,
+    photoURL: null,
+    metadata: {
+      creationTime: '',
+      lastSignInTime: '',
+    },
+    providerData: [],
+    providerId: 'firebase',
+    refreshToken: 'e2e-refresh-token',
+    tenantId: null,
+    delete: async () => undefined,
+    getIdToken: async () => 'e2e-token',
+    getIdTokenResult: async () => ({
+      token: 'e2e-token',
+      authTime: '',
+      expirationTime: '',
+      issuedAtTime: '',
+      signInProvider: 'custom',
+      signInSecondFactor: null,
+      claims: {},
+    }),
+    reload: async () => undefined,
+    toJSON: () => ({ uid: 'e2e-user' }),
+  } as User;
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(Boolean(auth));
+  const bypassEnabled =
+    isE2ETestingEnabled &&
+      typeof window !== 'undefined' &&
+      window.localStorage.getItem(E2E_BYPASS_STORAGE_KEY) === '1';
+  const [user, setUser] = useState<User | null>(() => {
+    return bypassEnabled ? createE2ETestUser() : null;
+  });
+  const [loading, setLoading] = useState(() => {
+    if (bypassEnabled) {
+      return false;
+    }
+
+    return Boolean(auth);
+  });
 
   useEffect(() => {
-    if (!auth) return undefined;
+    if (bypassEnabled) return undefined;
+
+    if (!auth) {
+      return undefined;
+    }
 
     const unsubscribe = onAuthStateChanged(auth, (u) => {
       setUser(u);
       setLoading(false);
     });
     return unsubscribe;
-  }, []);
+  }, [bypassEnabled]);
 
   const login = async () => {
     if (!auth || !googleProvider) {
