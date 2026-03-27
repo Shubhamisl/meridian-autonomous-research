@@ -15,7 +15,10 @@ class ChromaChunkRepository(ChunkRepository):
         self.collection.upsert(
             ids=[c.id for c in chunks],
             documents=[c.content for c in chunks],
-            metadatas=[{**c.metadata, "job_id": job_id} for c in chunks]
+            metadatas=[
+                {**c.metadata, "job_id": job_id, "credibility_score": c.credibility_score}
+                for c in chunks
+            ]
         )
 
     async def search(self, job_id: str, query: str, top_k: int = 5) -> List[Chunk]:
@@ -28,10 +31,12 @@ class ChromaChunkRepository(ChunkRepository):
         chunks = []
         if results and results["ids"] and len(results["ids"]) > 0:
             for idx in range(len(results["ids"][0])):
+                metadata = results["metadatas"][0][idx]
                 chunks.append(Chunk(
                     id=results["ids"][0][idx],
-                    document_id=results["metadatas"][0][idx].get("document_id", "unknown"),
+                    document_id=metadata.get("document_id", "unknown"),
                     content=results["documents"][0][idx],
-                    metadata=results["metadatas"][0][idx]
+                    metadata=metadata,
+                    credibility_score=metadata.get("credibility_score", 0.5)
                 ))
         return chunks
