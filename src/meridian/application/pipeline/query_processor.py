@@ -7,6 +7,7 @@ class QueryProcessor:
     AFTER_FILTER = "after:2022-01-01"
     WEB_EXCLUSIONS = ("-site:reddit.com", "-site:quora.com")
     PHRASE_SOURCES = {"arxiv", "pubmed"}
+    BOOLEAN_OPERATORS = {"AND", "OR", "NOT"}
 
     def enrich(self, raw_query: str, domain: str, source: str) -> str:
         try:
@@ -23,7 +24,7 @@ class QueryProcessor:
             if not tokens or not self._has_intent_term(tokens):
                 return raw_query
 
-            if source_key in self.PHRASE_SOURCES:
+            if source_key in self.PHRASE_SOURCES and not self._contains_unsafe_academic_syntax(tokens):
                 tokens = self._quote_multi_word_runs(tokens)
 
             tokens = self._add_domain_filters(tokens, domain_key)
@@ -99,6 +100,14 @@ class QueryProcessor:
         flush_pending_terms()
         return quoted_tokens
 
+    def _contains_unsafe_academic_syntax(self, tokens: list[str]) -> bool:
+        return any(
+            self._is_boolean_operator(token)
+            or self._has_fielded_query_syntax(token)
+            or self._has_grouping_syntax(token)
+            for token in tokens
+        )
+
     def _add_domain_filters(self, tokens: list[str], domain: str) -> list[str]:
         if domain not in {"computer_science", "biomedical"}:
             return tokens
@@ -128,6 +137,15 @@ class QueryProcessor:
     def _is_operator(self, token: str) -> bool:
         lowered = token.lower()
         return lowered.startswith("after:") or lowered.startswith("-site:")
+
+    def _is_boolean_operator(self, token: str) -> bool:
+        return token in self.BOOLEAN_OPERATORS
+
+    def _has_fielded_query_syntax(self, token: str) -> bool:
+        return ":" in token and not self._is_operator(token)
+
+    def _has_grouping_syntax(self, token: str) -> bool:
+        return "(" in token or ")" in token
 
     def _is_quoted_phrase(self, token: str) -> bool:
         return len(token) >= 2 and token.startswith('"') and token.endswith('"')

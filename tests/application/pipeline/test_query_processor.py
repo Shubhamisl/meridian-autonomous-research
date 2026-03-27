@@ -53,3 +53,21 @@ def test_enrich_preserves_core_terms_under_aggressive_rewrite(processor: QueryPr
 @pytest.mark.parametrize("raw_query", ["", "   "])
 def test_enrich_returns_raw_input_safely_for_broken_input(processor: QueryProcessor, raw_query: str) -> None:
     assert processor.enrich(raw_query, "computer_science", "arxiv") == raw_query
+
+
+def test_enrich_preserves_boolean_syntax_without_disabling_safe_enrichment(processor: QueryProcessor) -> None:
+    raw_query = "gene therapy OR crispr"
+
+    assert processor.enrich(raw_query, "biomedical", "pubmed") == "gene therapy OR crispr after:2022-01-01"
+
+
+def test_enrich_keeps_lowercase_connectors_quoteable_for_academic_sources(processor: QueryProcessor) -> None:
+    raw_query = "machine learning and robotics"
+
+    assert processor.enrich(raw_query, "computer_science", "arxiv") == '"machine learning and robotics" after:2022-01-01'
+
+
+def test_enrich_preserves_fielded_syntax_without_disabling_safe_enrichment(processor: QueryProcessor) -> None:
+    raw_query = "machine learning site:arxiv.org"
+
+    assert processor.enrich(raw_query, "computer_science", "arxiv") == "machine learning site:arxiv.org after:2022-01-01"
