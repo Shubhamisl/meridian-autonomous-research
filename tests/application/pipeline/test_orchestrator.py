@@ -44,14 +44,6 @@ class FakeAgent:
         self.documents = documents
         self.calls = []
         self.domain = "computer_science"
-        self.active_sources = ["arxiv", "ieee", "web"]
-        self.query_refinements = [
-            {
-                "source": "arxiv",
-                "raw_query": "threat actor report",
-                "enriched_query": "\"threat actor report\" after:2022-01-01",
-            }
-        ]
 
     async def run(self, topic, max_iterations=5):
         self.calls.append(topic)
@@ -284,3 +276,11 @@ async def test_run_pipeline_logs_and_persists_workspace_metadata(monkeypatch, ca
     assert report.metadata["domain"] == "computer_science"
     assert report.metadata["format_label"] == "osint"
     assert report.metadata["pipeline"]["current_phase"] == "synthesize"
+    assert report.metadata["active_sources"] == ["arxiv"]
+    assert report.metadata["query_refinements"] == [
+        {
+            "source": "arxiv",
+            "raw_query": "threat actor report",
+            "enriched_query": "threat actor report",
+        }
+    ]

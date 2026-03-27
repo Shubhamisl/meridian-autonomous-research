@@ -94,6 +94,19 @@ def build_explainability_payload(metadata: dict) -> ExplainabilityPayload:
             }
         )
 
+    if not normalized_refinements:
+        query = metadata.get("query")
+        if isinstance(query, str) and query:
+            normalized_refinements = [
+                {
+                    "source": source,
+                    "raw_query": query,
+                    "enriched_query": query,
+                }
+                for source in active_sources
+                if isinstance(source, str) and source
+            ]
+
     return ExplainabilityPayload(
         active_sources=[source for source in active_sources if isinstance(source, str) and source],
         query_refinements=normalized_refinements,
@@ -161,6 +174,7 @@ async def get_research_report(
         raise HTTPException(status_code=404, detail="Report not ready yet or job failed.")
 
     workspace_metadata = {**_workspace_metadata(job), **_workspace_metadata(report)}
+    workspace_metadata.setdefault("query", report.query)
     evidence_chunks = []
     if ChromaChunkRepository is not None:
         try:

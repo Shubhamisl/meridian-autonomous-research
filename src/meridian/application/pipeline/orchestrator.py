@@ -54,6 +54,22 @@ def _normalize_query_refinements(query_refinements: Any) -> list[dict[str, str]]
         )
     return normalized
 
+
+def _derive_query_refinements(query: str, sources: list[str], recorded: Any) -> list[dict[str, str]]:
+    normalized = _normalize_query_refinements(recorded)
+    if normalized:
+        return normalized
+    if not isinstance(query, str) or not query:
+        return []
+    return [
+        {
+            "source": source,
+            "raw_query": query,
+            "enriched_query": query,
+        }
+        for source in _unique_in_order(sources)
+    ]
+
 class PipelineOrchestrator:
     def __init__(
         self,
@@ -88,12 +104,15 @@ class PipelineOrchestrator:
             # Phase 1: Research Agent loop
             documents = await self.agent.run(topic=job.query)
             workspace_metadata["domain"] = getattr(self.agent, "domain", "general")
-            workspace_metadata["active_sources"] = _unique_in_order(
-                list(getattr(self.agent, "active_sources", []))
-                or [document.source for document in documents]
+            active_sources = _unique_in_order(
+                [document.source for document in documents]
+                or list(getattr(self.agent, "active_sources", []))
             )
-            workspace_metadata["query_refinements"] = _normalize_query_refinements(
-                getattr(self.agent, "query_refinements", [])
+            workspace_metadata["active_sources"] = active_sources
+            workspace_metadata["query_refinements"] = _derive_query_refinements(
+                job.query,
+                active_sources,
+                getattr(self.agent, "query_refinements", []),
             )
 
             # Phase 2: Chunk & Embed
