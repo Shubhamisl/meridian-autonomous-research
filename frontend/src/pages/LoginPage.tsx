@@ -4,7 +4,7 @@ import { Navigate } from 'react-router-dom';
 import { useAuth } from '../contexts/useAuth';
 
 export default function LoginPage() {
-  const { user, login } = useAuth();
+  const { user, login, isConfigured, setupMessage } = useAuth();
 
   if (user) return <Navigate to="/dashboard" replace />;
 
@@ -33,17 +33,23 @@ export default function LoginPage() {
           </div>
 
           <h1 className="font-serif text-4xl font-semibold tracking-tight text-ink">
-            Enter the research workspace
+            {isConfigured ? 'Enter the research workspace' : 'Finish workspace setup'}
           </h1>
           <p className="mx-auto mt-4 max-w-md text-sm leading-7 text-slate/75">
-            Sign in to access Meridian&apos;s guided dashboard, revisit prior syntheses, and open
-            full report workspaces with evidence-aware intelligence.
+            {isConfigured
+              ? "Sign in to access Meridian's guided dashboard, revisit prior syntheses, and open full report workspaces with evidence-aware intelligence."
+              : 'Meridian can render the new workspace shell, but Google sign-in is paused until the frontend Firebase environment variables are added.'}
           </p>
         </div>
 
         <button
           onClick={login}
-          className="group flex w-full items-center justify-center gap-3 rounded-2xl border border-ink/10 bg-white px-6 py-4 font-semibold text-ink shadow-soft transition-all duration-200 hover:-translate-y-0.5 hover:border-teal/20 hover:shadow-panel active:translate-y-0"
+          disabled={!isConfigured}
+          className={`group flex w-full items-center justify-center gap-3 rounded-2xl border px-6 py-4 font-semibold shadow-soft transition-all duration-200 active:translate-y-0 ${
+            isConfigured
+              ? 'border-ink/10 bg-white text-ink hover:-translate-y-0.5 hover:border-teal/20 hover:shadow-panel'
+              : 'cursor-not-allowed border-fog/80 bg-paper text-slate/45'
+          }`}
         >
           <svg className="h-5 w-5" viewBox="0 0 24 24">
             <path
@@ -63,19 +69,32 @@ export default function LoginPage() {
               d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
             />
           </svg>
-          <span>Continue with Google</span>
+          <span>{isConfigured ? 'Continue with Google' : 'Google sign-in needs setup'}</span>
         </button>
 
-        <div className="mt-8 rounded-2xl border border-fog/70 bg-paper px-5 py-4 text-left">
-          <div className="section-label text-[10px]">What happens after sign-in</div>
-          <p className="mt-2 text-sm leading-6 text-slate/75">
-            Start a new inquiry from the dashboard, revisit previous runs, and open report
-            workspaces that keep the answer first while making evidence and reasoning inspectable.
-          </p>
-        </div>
+        {isConfigured ? (
+          <div className="mt-8 rounded-2xl border border-fog/70 bg-paper px-5 py-4 text-left">
+            <div className="section-label text-[10px]">What happens after sign-in</div>
+            <p className="mt-2 text-sm leading-6 text-slate/75">
+              Start a new inquiry from the dashboard, revisit previous runs, and open report
+              workspaces that keep the answer first while making evidence and reasoning inspectable.
+            </p>
+          </div>
+        ) : (
+          <div className="mt-8 rounded-2xl border border-amber/25 bg-amber/10 px-5 py-4 text-left">
+            <div className="section-label !text-amber text-[10px]">Setup required</div>
+            <p className="mt-2 text-sm leading-6 text-slate/80">
+              {setupMessage ?? 'Firebase sign-in is not configured yet.'}
+            </p>
+            <p className="mt-3 text-xs leading-6 text-slate/60">
+              Copy `frontend/.env.example` to `frontend/.env` and supply the real Firebase values
+              to unlock dashboard and workspace access.
+            </p>
+          </div>
+        )}
 
         <p className="mt-8 text-xs tracking-wide text-slate/45">
-          Meridian Research Workspace © 2026
+          Meridian Research Workspace (c) 2026
         </p>
       </motion.div>
     </div>
