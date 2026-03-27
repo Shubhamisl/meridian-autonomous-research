@@ -33,6 +33,22 @@ class FakeClassifier:
         self.openrouter_client = openrouter_client
 
 
+class FakeCredibilityScorer:
+    instances = []
+
+    def __init__(self, openrouter_client):
+        self.openrouter_client = openrouter_client
+        self.__class__.instances.append(self)
+
+
+class FakeChunkingService:
+    instances = []
+
+    def __init__(self, credibility_scorer):
+        self.credibility_scorer = credibility_scorer
+        self.__class__.instances.append(self)
+
+
 class FakeRouter:
     def __init__(self):
         self.calls = []
@@ -97,8 +113,14 @@ class FakeOrchestrator:
 async def test_run_job_async_wires_phase_a_dependencies(monkeypatch):
     FakeOrchestrator.instances.clear()
     FakeResearchAgent.instances.clear()
+    FakeCredibilityScorer.instances.clear()
+    FakeChunkingService.instances.clear()
     fake_session = FakeSession()
     fake_router = FakeRouter()
+    fake_chunking_module = types.ModuleType("src.meridian.application.pipeline.chunking")
+    fake_chunking_module.ChunkingService = FakeChunkingService
+    fake_credibility_module = types.ModuleType("src.meridian.application.pipeline.credibility_scorer")
+    fake_credibility_module.CredibilityScorer = FakeCredibilityScorer
     fake_chroma_module = types.ModuleType("src.meridian.infrastructure.vector_store.chroma_repository")
     fake_chroma_module.ChromaChunkRepository = FakeChunkRepo
     fake_wikipedia_module = types.ModuleType("src.meridian.infrastructure.external_apis.wikipedia_client")
@@ -121,6 +143,8 @@ async def test_run_job_async_wires_phase_a_dependencies(monkeypatch):
     monkeypatch.setattr("src.meridian.infrastructure.database.session.SessionLocal", lambda: fake_session)
     monkeypatch.setattr("src.meridian.infrastructure.database.sqlite_repositories.SQLiteResearchJobRepository", FakeRepo)
     monkeypatch.setattr("src.meridian.infrastructure.database.sqlite_repositories.SQLiteResearchReportRepository", FakeRepo)
+    monkeypatch.setitem(sys.modules, "src.meridian.application.pipeline.chunking", fake_chunking_module)
+    monkeypatch.setitem(sys.modules, "src.meridian.application.pipeline.credibility_scorer", fake_credibility_module)
     monkeypatch.setitem(sys.modules, "src.meridian.infrastructure.vector_store.chroma_repository", fake_chroma_module)
     monkeypatch.setitem(sys.modules, "src.meridian.infrastructure.external_apis.wikipedia_client", fake_wikipedia_module)
     monkeypatch.setitem(sys.modules, "src.meridian.infrastructure.external_apis.arxiv_client", fake_arxiv_module)
@@ -143,6 +167,8 @@ async def test_run_job_async_wires_phase_a_dependencies(monkeypatch):
 
     orchestrator = FakeOrchestrator.instances[0]
     agent = orchestrator.kwargs["agent"]
+    chunking_service = orchestrator.kwargs["chunking_service"]
+    credibility_scorer = chunking_service.credibility_scorer
     assert agent.domain_classifier.openrouter_client.__class__ is FakeOpenRouterClient
     assert agent.source_router is fake_router
     assert agent.pubmed_client.__class__ is FakeSourceClient
@@ -150,3 +176,8 @@ async def test_run_job_async_wires_phase_a_dependencies(monkeypatch):
     assert agent.semantic_scholar_client.__class__ is FakeSourceClient
     assert len(FakeResearchAgent.instances) == 1
     assert orchestrator.kwargs["synthesizer"].openrouter_client.__class__ is FakeOpenRouterClient
+    assert len(FakeCredibilityScorer.instances) == 1
+    assert len(FakeChunkingService.instances) == 1
+    assert credibility_scorer is FakeCredibilityScorer.instances[0]
+    assert chunking_service is FakeChunkingService.instances[0]
+    assert credibility_scorer.openrouter_client.__class__ is FakeOpenRouterClient

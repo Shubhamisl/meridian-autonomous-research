@@ -64,7 +64,7 @@ class FakeChunkingService:
 
 
 @pytest.mark.asyncio
-async def test_run_pipeline_uses_chunking_service_instead_of_inline_chunking(monkeypatch):
+async def test_run_pipeline_uses_chunking_service_and_logs_document_summary(monkeypatch, caplog):
     fake_research_agent_module = types.ModuleType("src.meridian.infrastructure.llm.research_agent")
     fake_research_agent_module.ResearchAgent = object
     fake_synthesizer_module = types.ModuleType("src.meridian.infrastructure.llm.synthesizer")
@@ -76,8 +76,8 @@ async def test_run_pipeline_uses_chunking_service_instead_of_inline_chunking(mon
     PipelineOrchestrator = orchestrator_module.PipelineOrchestrator
 
     job = ResearchJob(query="q")
-    document = Document(source="web", url="https://example.com", title="T", content="content")
-    chunk = Chunk(document_id=document.id, content="service chunk")
+    document = Document(source="web", url="https://example.com", title="T" * 80, content="content")
+    chunk = Chunk(document_id=document.id, content="service chunk", credibility_score=0.87)
     job_repo = FakeJobRepo(job)
     report_repo = FakeReportRepo()
     chunk_repo = FakeChunkRepo()
@@ -100,9 +100,17 @@ async def test_run_pipeline_uses_chunking_service_instead_of_inline_chunking(mon
         chunking_service=chunking_service,
     )
 
-    await orchestrator.run_pipeline(job.id)
+    with caplog.at_level("INFO"):
+        await orchestrator.run_pipeline(job.id)
 
     assert len(chunking_service.calls) == 1
     assert chunking_service.calls[0] == [document]
     assert chunk_repo.saved_chunks == [chunk]
     assert len(report_repo.saved_reports) == 1
+    assert [
+        record.message
+        for record in caplog.records
+        if record.levelname == "INFO"
+    ] == [
+        f"Chunked document summary: source=web title={'T' * 60} credibility_score=0.87"
+    ]

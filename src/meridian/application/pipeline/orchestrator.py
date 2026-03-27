@@ -1,7 +1,11 @@
+import logging
+
 from src.meridian.domain.repositories import ResearchJobRepository, ResearchReportRepository, ChunkRepository
 from src.meridian.infrastructure.llm.research_agent import ResearchAgent
 from src.meridian.infrastructure.llm.synthesizer import ReportSynthesizer
 from src.meridian.application.pipeline.chunking import ChunkingService
+
+logger = logging.getLogger(__name__)
 
 class PipelineOrchestrator:
     def __init__(
@@ -34,6 +38,17 @@ class PipelineOrchestrator:
 
             # Phase 2: Chunk & Embed
             all_chunks = await self.chunking_service.chunk_documents(documents)
+            for document in documents:
+                document_chunks = [chunk for chunk in all_chunks if chunk.document_id == document.id]
+                if not document_chunks:
+                    continue
+
+                logger.info(
+                    "Chunked document summary: source=%s title=%s credibility_score=%.2f",
+                    document.source,
+                    document.title[:60],
+                    document_chunks[0].credibility_score,
+                )
 
             await self.chunk_repo.save_all(job_id, all_chunks)
 
