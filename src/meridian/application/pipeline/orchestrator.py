@@ -1,7 +1,7 @@
 from src.meridian.domain.repositories import ResearchJobRepository, ResearchReportRepository, ChunkRepository
 from src.meridian.infrastructure.llm.research_agent import ResearchAgent
 from src.meridian.infrastructure.llm.synthesizer import ReportSynthesizer
-from src.meridian.application.pipeline.chunking import chunk_document
+from src.meridian.application.pipeline.chunking import ChunkingService
 
 class PipelineOrchestrator:
     def __init__(
@@ -10,13 +10,15 @@ class PipelineOrchestrator:
         report_repo: ResearchReportRepository,
         chunk_repo: ChunkRepository,
         agent: ResearchAgent,
-        synthesizer: ReportSynthesizer
+        synthesizer: ReportSynthesizer,
+        chunking_service: ChunkingService,
     ):
         self.job_repo = job_repo
         self.report_repo = report_repo
         self.chunk_repo = chunk_repo
         self.agent = agent
         self.synthesizer = synthesizer
+        self.chunking_service = chunking_service
 
     async def run_pipeline(self, job_id: str):
         job = await self.job_repo.get(job_id)
@@ -31,10 +33,7 @@ class PipelineOrchestrator:
             documents = await self.agent.run(topic=job.query)
 
             # Phase 2: Chunk & Embed
-            all_chunks = []
-            for doc in documents:
-                chunks = chunk_document(doc)
-                all_chunks.extend(chunks)
+            all_chunks = await self.chunking_service.chunk_documents(documents)
 
             await self.chunk_repo.save_all(job_id, all_chunks)
 

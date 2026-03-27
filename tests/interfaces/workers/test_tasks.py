@@ -101,22 +101,42 @@ async def test_run_job_async_wires_phase_a_dependencies(monkeypatch):
     fake_router = FakeRouter()
     fake_chroma_module = types.ModuleType("src.meridian.infrastructure.vector_store.chroma_repository")
     fake_chroma_module.ChromaChunkRepository = FakeChunkRepo
+    fake_wikipedia_module = types.ModuleType("src.meridian.infrastructure.external_apis.wikipedia_client")
+    fake_wikipedia_module.WikipediaClient = FakeSourceClient
+    fake_arxiv_module = types.ModuleType("src.meridian.infrastructure.external_apis.arxiv_client")
+    fake_arxiv_module.ArXivClient = FakeSourceClient
+    fake_web_search_module = types.ModuleType("src.meridian.infrastructure.external_apis.web_search_client")
+    fake_web_search_module.WebSearchClient = FakeSourceClient
+    fake_pubmed_module = types.ModuleType("src.meridian.infrastructure.external_apis.pubmed_client")
+    fake_pubmed_module.PubMedClient = FakeSourceClient
+    fake_ieee_module = types.ModuleType("src.meridian.infrastructure.external_apis.ieee_client")
+    fake_ieee_module.IEEEClient = FakeSourceClient
+    fake_semantic_scholar_module = types.ModuleType("src.meridian.infrastructure.external_apis.semantic_scholar_client")
+    fake_semantic_scholar_module.SemanticScholarClient = FakeSourceClient
+    fake_research_agent_module = types.ModuleType("src.meridian.infrastructure.llm.research_agent")
+    fake_research_agent_module.ResearchAgent = FakeResearchAgent
+    fake_synthesizer_module = types.ModuleType("src.meridian.infrastructure.llm.synthesizer")
+    fake_synthesizer_module.ReportSynthesizer = FakeSynthesizer
 
     monkeypatch.setattr("src.meridian.infrastructure.database.session.SessionLocal", lambda: fake_session)
     monkeypatch.setattr("src.meridian.infrastructure.database.sqlite_repositories.SQLiteResearchJobRepository", FakeRepo)
     monkeypatch.setattr("src.meridian.infrastructure.database.sqlite_repositories.SQLiteResearchReportRepository", FakeRepo)
     monkeypatch.setitem(sys.modules, "src.meridian.infrastructure.vector_store.chroma_repository", fake_chroma_module)
+    monkeypatch.setitem(sys.modules, "src.meridian.infrastructure.external_apis.wikipedia_client", fake_wikipedia_module)
+    monkeypatch.setitem(sys.modules, "src.meridian.infrastructure.external_apis.arxiv_client", fake_arxiv_module)
+    monkeypatch.setitem(sys.modules, "src.meridian.infrastructure.external_apis.web_search_client", fake_web_search_module)
+    monkeypatch.setitem(sys.modules, "src.meridian.infrastructure.external_apis.pubmed_client", fake_pubmed_module)
+    monkeypatch.setitem(sys.modules, "src.meridian.infrastructure.external_apis.ieee_client", fake_ieee_module)
+    monkeypatch.setitem(
+        sys.modules,
+        "src.meridian.infrastructure.external_apis.semantic_scholar_client",
+        fake_semantic_scholar_module,
+    )
+    monkeypatch.setitem(sys.modules, "src.meridian.infrastructure.llm.research_agent", fake_research_agent_module)
+    monkeypatch.setitem(sys.modules, "src.meridian.infrastructure.llm.synthesizer", fake_synthesizer_module)
     monkeypatch.setattr("src.meridian.infrastructure.llm.openrouter_client.OpenRouterClient", FakeOpenRouterClient)
     monkeypatch.setattr("src.meridian.application.pipeline.domain_classifier.DomainClassifier", FakeClassifier)
     monkeypatch.setattr("src.meridian.application.pipeline.source_router.SourceRouter", lambda: fake_router)
-    monkeypatch.setattr("src.meridian.infrastructure.external_apis.wikipedia_client.WikipediaClient", FakeSourceClient)
-    monkeypatch.setattr("src.meridian.infrastructure.external_apis.arxiv_client.ArXivClient", FakeSourceClient)
-    monkeypatch.setattr("src.meridian.infrastructure.external_apis.web_search_client.WebSearchClient", FakeSourceClient)
-    monkeypatch.setattr("src.meridian.infrastructure.external_apis.pubmed_client.PubMedClient", FakeSourceClient)
-    monkeypatch.setattr("src.meridian.infrastructure.external_apis.ieee_client.IEEEClient", FakeSourceClient)
-    monkeypatch.setattr("src.meridian.infrastructure.external_apis.semantic_scholar_client.SemanticScholarClient", FakeSourceClient)
-    monkeypatch.setattr("src.meridian.infrastructure.llm.research_agent.ResearchAgent", FakeResearchAgent)
-    monkeypatch.setattr("src.meridian.infrastructure.llm.synthesizer.ReportSynthesizer", FakeSynthesizer)
     monkeypatch.setattr("src.meridian.application.pipeline.orchestrator.PipelineOrchestrator", FakeOrchestrator)
 
     await tasks._run_job_async("job-123")

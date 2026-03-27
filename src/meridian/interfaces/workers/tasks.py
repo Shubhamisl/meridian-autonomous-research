@@ -4,6 +4,8 @@ from src.meridian.interfaces.workers.app import celery_app
 async def _run_job_async(job_id: str):
     from src.meridian.application.pipeline.orchestrator import PipelineOrchestrator
     from src.meridian.application.pipeline.domain_classifier import DomainClassifier
+    from src.meridian.application.pipeline.chunking import ChunkingService
+    from src.meridian.application.pipeline.credibility_scorer import CredibilityScorer
     from src.meridian.application.pipeline.source_router import SourceRouter
     from src.meridian.infrastructure.database.session import SessionLocal
     from src.meridian.infrastructure.database.sqlite_repositories import (
@@ -27,6 +29,8 @@ async def _run_job_async(job_id: str):
         chunk_repo = ChromaChunkRepository()
         openrouter = OpenRouterClient()
         domain_classifier = DomainClassifier(openrouter)
+        credibility_scorer = CredibilityScorer(openrouter)
+        chunking_service = ChunkingService(credibility_scorer)
         source_router = SourceRouter()
         wikipedia_client = WikipediaClient()
         arxiv_client = ArXivClient()
@@ -52,7 +56,8 @@ async def _run_job_async(job_id: str):
             report_repo=report_repo,
             chunk_repo=chunk_repo,
             agent=agent,
-            synthesizer=synthesizer
+            synthesizer=synthesizer,
+            chunking_service=chunking_service,
         )
 
         await orchestrator.run_pipeline(job_id)
