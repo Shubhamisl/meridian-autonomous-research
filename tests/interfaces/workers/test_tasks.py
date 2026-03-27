@@ -57,6 +57,13 @@ class FakeFormatSelector:
         self.__class__.instances.append(self)
 
 
+class FakeQueryProcessor:
+    instances = []
+
+    def __init__(self):
+        self.__class__.instances.append(self)
+
+
 class FakeRouter:
     def __init__(self):
         self.calls = []
@@ -84,6 +91,7 @@ class FakeResearchAgent:
         pubmed_client=None,
         ieee_client=None,
         semantic_scholar_client=None,
+        query_processor=None,
     ):
         self.openrouter_client = openrouter_client
         self.domain_classifier = domain_classifier
@@ -94,6 +102,7 @@ class FakeResearchAgent:
         self.pubmed_client = pubmed_client
         self.ieee_client = ieee_client
         self.semantic_scholar_client = semantic_scholar_client
+        self.query_processor = query_processor
         self.__class__.instances.append(self)
 
     async def run(self, topic, max_iterations=5):
@@ -124,14 +133,26 @@ async def test_run_job_async_wires_phase_c_dependencies(monkeypatch):
     FakeCredibilityScorer.instances.clear()
     FakeChunkingService.instances.clear()
     FakeFormatSelector.instances.clear()
+    FakeQueryProcessor.instances.clear()
     fake_session = FakeSession()
     fake_router = FakeRouter()
+    fake_session_module = types.ModuleType("src.meridian.infrastructure.database.session")
+    fake_session_module.SessionLocal = lambda: fake_session
+    fake_repositories_module = types.ModuleType("src.meridian.infrastructure.database.sqlite_repositories")
+    fake_repositories_module.SQLiteResearchJobRepository = FakeRepo
+    fake_repositories_module.SQLiteResearchReportRepository = FakeRepo
     fake_chunking_module = types.ModuleType("src.meridian.application.pipeline.chunking")
     fake_chunking_module.ChunkingService = FakeChunkingService
+    fake_domain_classifier_module = types.ModuleType("src.meridian.application.pipeline.domain_classifier")
+    fake_domain_classifier_module.DomainClassifier = FakeClassifier
     fake_credibility_module = types.ModuleType("src.meridian.application.pipeline.credibility_scorer")
     fake_credibility_module.CredibilityScorer = FakeCredibilityScorer
     fake_format_selector_module = types.ModuleType("src.meridian.application.pipeline.format_selector")
     fake_format_selector_module.FormatSelector = FakeFormatSelector
+    fake_source_router_module = types.ModuleType("src.meridian.application.pipeline.source_router")
+    fake_source_router_module.SourceRouter = lambda: fake_router
+    fake_query_processor_module = types.ModuleType("src.meridian.application.pipeline.query_processor")
+    fake_query_processor_module.QueryProcessor = FakeQueryProcessor
     fake_chroma_module = types.ModuleType("src.meridian.infrastructure.vector_store.chroma_repository")
     fake_chroma_module.ChromaChunkRepository = FakeChunkRepo
     fake_wikipedia_module = types.ModuleType("src.meridian.infrastructure.external_apis.wikipedia_client")
@@ -146,17 +167,23 @@ async def test_run_job_async_wires_phase_c_dependencies(monkeypatch):
     fake_ieee_module.IEEEClient = FakeSourceClient
     fake_semantic_scholar_module = types.ModuleType("src.meridian.infrastructure.external_apis.semantic_scholar_client")
     fake_semantic_scholar_module.SemanticScholarClient = FakeSourceClient
+    fake_openrouter_module = types.ModuleType("src.meridian.infrastructure.llm.openrouter_client")
+    fake_openrouter_module.OpenRouterClient = FakeOpenRouterClient
     fake_research_agent_module = types.ModuleType("src.meridian.infrastructure.llm.research_agent")
     fake_research_agent_module.ResearchAgent = FakeResearchAgent
     fake_synthesizer_module = types.ModuleType("src.meridian.infrastructure.llm.synthesizer")
     fake_synthesizer_module.ReportSynthesizer = FakeSynthesizer
+    fake_orchestrator_module = types.ModuleType("src.meridian.application.pipeline.orchestrator")
+    fake_orchestrator_module.PipelineOrchestrator = FakeOrchestrator
 
-    monkeypatch.setattr("src.meridian.infrastructure.database.session.SessionLocal", lambda: fake_session)
-    monkeypatch.setattr("src.meridian.infrastructure.database.sqlite_repositories.SQLiteResearchJobRepository", FakeRepo)
-    monkeypatch.setattr("src.meridian.infrastructure.database.sqlite_repositories.SQLiteResearchReportRepository", FakeRepo)
+    monkeypatch.setitem(sys.modules, "src.meridian.infrastructure.database.session", fake_session_module)
+    monkeypatch.setitem(sys.modules, "src.meridian.infrastructure.database.sqlite_repositories", fake_repositories_module)
     monkeypatch.setitem(sys.modules, "src.meridian.application.pipeline.chunking", fake_chunking_module)
+    monkeypatch.setitem(sys.modules, "src.meridian.application.pipeline.domain_classifier", fake_domain_classifier_module)
     monkeypatch.setitem(sys.modules, "src.meridian.application.pipeline.credibility_scorer", fake_credibility_module)
     monkeypatch.setitem(sys.modules, "src.meridian.application.pipeline.format_selector", fake_format_selector_module)
+    monkeypatch.setitem(sys.modules, "src.meridian.application.pipeline.source_router", fake_source_router_module)
+    monkeypatch.setitem(sys.modules, "src.meridian.application.pipeline.query_processor", fake_query_processor_module)
     monkeypatch.setitem(sys.modules, "src.meridian.infrastructure.vector_store.chroma_repository", fake_chroma_module)
     monkeypatch.setitem(sys.modules, "src.meridian.infrastructure.external_apis.wikipedia_client", fake_wikipedia_module)
     monkeypatch.setitem(sys.modules, "src.meridian.infrastructure.external_apis.arxiv_client", fake_arxiv_module)
@@ -168,12 +195,10 @@ async def test_run_job_async_wires_phase_c_dependencies(monkeypatch):
         "src.meridian.infrastructure.external_apis.semantic_scholar_client",
         fake_semantic_scholar_module,
     )
+    monkeypatch.setitem(sys.modules, "src.meridian.infrastructure.llm.openrouter_client", fake_openrouter_module)
     monkeypatch.setitem(sys.modules, "src.meridian.infrastructure.llm.research_agent", fake_research_agent_module)
     monkeypatch.setitem(sys.modules, "src.meridian.infrastructure.llm.synthesizer", fake_synthesizer_module)
-    monkeypatch.setattr("src.meridian.infrastructure.llm.openrouter_client.OpenRouterClient", FakeOpenRouterClient)
-    monkeypatch.setattr("src.meridian.application.pipeline.domain_classifier.DomainClassifier", FakeClassifier)
-    monkeypatch.setattr("src.meridian.application.pipeline.source_router.SourceRouter", lambda: fake_router)
-    monkeypatch.setattr("src.meridian.application.pipeline.orchestrator.PipelineOrchestrator", FakeOrchestrator)
+    monkeypatch.setitem(sys.modules, "src.meridian.application.pipeline.orchestrator", fake_orchestrator_module)
 
     await tasks._run_job_async("job-123")
 
@@ -192,8 +217,10 @@ async def test_run_job_async_wires_phase_c_dependencies(monkeypatch):
     assert len(FakeCredibilityScorer.instances) == 1
     assert len(FakeChunkingService.instances) == 1
     assert len(FakeFormatSelector.instances) == 1
+    assert len(FakeQueryProcessor.instances) == 1
     assert credibility_scorer is FakeCredibilityScorer.instances[0]
     assert chunking_service is FakeChunkingService.instances[0]
     assert credibility_scorer.openrouter_client.__class__ is FakeOpenRouterClient
     assert format_selector is FakeFormatSelector.instances[0]
     assert format_selector.openrouter_client.__class__ is FakeOpenRouterClient
+    assert agent.query_processor is FakeQueryProcessor.instances[0]

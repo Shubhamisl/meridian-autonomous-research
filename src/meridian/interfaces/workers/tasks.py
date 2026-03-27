@@ -7,6 +7,7 @@ async def _run_job_async(job_id: str):
     from src.meridian.application.pipeline.chunking import ChunkingService
     from src.meridian.application.pipeline.credibility_scorer import CredibilityScorer
     from src.meridian.application.pipeline.format_selector import FormatSelector
+    from src.meridian.application.pipeline.query_processor import QueryProcessor
     from src.meridian.application.pipeline.source_router import SourceRouter
     from src.meridian.infrastructure.database.session import SessionLocal
     from src.meridian.infrastructure.database.sqlite_repositories import (
@@ -33,6 +34,7 @@ async def _run_job_async(job_id: str):
         credibility_scorer = CredibilityScorer(openrouter)
         chunking_service = ChunkingService(credibility_scorer)
         format_selector = FormatSelector(openrouter)
+        query_processor = QueryProcessor()
         source_router = SourceRouter()
         wikipedia_client = WikipediaClient()
         arxiv_client = ArXivClient()
@@ -50,6 +52,7 @@ async def _run_job_async(job_id: str):
             pubmed_client=pubmed_client,
             ieee_client=ieee_client,
             semantic_scholar_client=semantic_scholar_client,
+            query_processor=query_processor,
         )
         synthesizer = ReportSynthesizer(openrouter)
 
