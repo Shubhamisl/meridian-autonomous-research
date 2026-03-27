@@ -1,45 +1,77 @@
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Newsreader:opsz,wght@6..72,300..800&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
+  :root {
+    color: #0f172a;
+    background-color: #f8fafc;
+  }
+
   body {
-    @apply bg-background text-zinc-100 min-h-screen antialiased selection:bg-accent selection:text-white;
-    background-image: 
-      radial-gradient(circle at 15% 50%, rgba(76, 29, 149, 0.15) 0%, transparent 50%),
-      radial-gradient(circle at 85% 30%, rgba(30, 58, 138, 0.15) 0%, transparent 50%);
+    @apply min-h-screen bg-ivory text-ink antialiased selection:bg-teal selection:text-white;
+    background-image:
+      radial-gradient(circle at top left, rgba(15, 118, 110, 0.10), transparent 24%),
+      radial-gradient(circle at top right, rgba(37, 99, 235, 0.05), transparent 18%),
+      linear-gradient(to bottom, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 1));
     background-attachment: fixed;
+    font-family: 'Manrope', sans-serif;
+  }
+
+  #root {
+    @apply min-h-screen;
   }
 }
 
 @layer components {
-  /* High-end Glassmorphism Utilities */
   .glass {
-    @apply bg-surface backdrop-blur-xl border border-border shadow-[0_8px_32px_0_rgba(0,0,0,0.36)];
+    @apply border border-fog/60 bg-white/80 shadow-soft backdrop-blur-sm;
   }
   
   .glass-panel {
-    @apply bg-surface backdrop-blur-2xl border border-border shadow-[inset_0_1px_1px_rgba(255,255,255,0.05)];
+    @apply border border-fog/60 bg-white/90 shadow-panel backdrop-blur-sm;
   }
 
   .glass-button {
-    @apply bg-surface hover:bg-surface-hover backdrop-blur-md border border-border transition-all duration-300 shadow-[0_4px_12px_rgba(0,0,0,0.2)];
+    @apply border border-fog/70 bg-white/90 text-slate transition-all duration-300 shadow-soft hover:bg-white;
   }
 
   .glass-input {
-    @apply bg-black/20 backdrop-blur-md border border-border text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent transition-all duration-300;
+    @apply border border-fog/80 bg-white/90 text-ink placeholder:text-slate/45 focus:outline-none focus:ring-2 focus:ring-teal/20 focus:border-teal/40 transition-all duration-300;
   }
   
   .text-gradient {
-    @apply bg-clip-text text-transparent bg-gradient-to-r from-zinc-100 via-zinc-300 to-zinc-500;
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-ink via-slate to-slate/70;
   }
   
   .text-gradient-accent {
-    @apply bg-clip-text text-transparent bg-gradient-to-r from-accent via-fuchsia-500 to-accent-light;
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-teal via-teal to-blue;
   }
 
   .glass-card {
-    @apply bg-white/[0.04] backdrop-blur-xl border border-white/[0.06] shadow-[0_8px_32px_0_rgba(0,0,0,0.36)];
+    @apply rounded-2xl border border-fog/60 bg-white/90 shadow-panel backdrop-blur-sm;
+  }
+
+  .editorial-panel {
+    @apply rounded-[1.5rem] border border-fog/60 bg-white/90 shadow-panel backdrop-blur-sm;
+  }
+
+  .editorial-muted {
+    @apply text-sm text-slate/70;
+  }
+
+  .status-pill {
+    @apply inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em];
+  }
+
+  .section-label {
+    @apply text-[11px] font-semibold uppercase tracking-[0.22em] text-teal;
+  }
+
+  .report-prose {
+    @apply prose prose-slate max-w-none prose-headings:font-serif prose-headings:text-ink prose-p:text-slate/90 prose-strong:text-ink prose-a:text-blue;
   }
 }
 

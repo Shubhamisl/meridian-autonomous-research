@@ -1,0 +1,41 @@
+Design a mobile-responsive research detail screen for Meridian, an autonomous research intelligence platform.
+
+Use the Meridian design system in ../DESIGN.md as the source of truth. This is the mobile version of the report workspace.
+
+Overall vibe:
+Focused, elegant, compact, trustworthy, reading-first.
+
+DESIGN SYSTEM (REQUIRED):
+- Platform: Mobile web
+- Keep the same palette, hierarchy, and premium editorial tone from desktop
+- Preserve report readability and trust signals on a smaller screen
+
+PAGE STRUCTURE:
+1. **Compact Header**
+- query title
+- status
+- domain / format pills
+
+2. **Executive Summary First**
+- concise and prominent
+- should anchor the screen immediately
+
+3. **Readable Report Body**
+- optimized spacing and typography for mobile reading
+- strong hierarchy for headings, bullets, and tables
+
+4. **Explainability Access**
+- use accordion sections or bottom sheets for source routing, credibility, and query refinement
+
+5. **Evidence Cards**
+- stacked vertically
+- source name, snippet, credibility badge, relevance hint, original-link action
+
+6. **Compact Pipeline Timeline**
+- simplified but still understandable
+
+7. **Sticky Utility Action**
+- quick access to sources, sections, or explainability
+
+UX GOAL:
+Mobile should feel like a serious research-reading tool rather than a compressed dashboard. It should prioritize clarity, trust, and progressive disclosure.

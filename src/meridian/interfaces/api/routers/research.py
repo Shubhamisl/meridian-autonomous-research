@@ -7,11 +7,24 @@ from src.meridian.infrastructure.database.models import DBResearchJob, DBResearc
 from src.meridian.domain.entities import ResearchJob
 from src.meridian.infrastructure.database.sqlite_repositories import SQLiteResearchJobRepository, SQLiteResearchReportRepository
 from src.meridian.infrastructure.auth.firebase_auth import get_current_user
+from src.meridian.interfaces.api.schemas.research_workspace import (
+    EvidenceItem,
+    ExplainabilityPayload,
+    PipelinePayload,
+    QueryRefinement,
+    ResearchWorkspaceResponse,
+)
 from src.meridian.interfaces.workers.tasks import run_research_pipeline
 import logging
 
+try:
+    from src.meridian.infrastructure.vector_store.chroma_repository import ChromaChunkRepository
+except ImportError:
+    ChromaChunkRepository = None
+
 router = APIRouter()
 SessionLocal = async_sessionmaker(bind=engine, autoflush=False, autocommit=False)
+PHASES = ["research", "chunk", "retrieve", "synthesize"]
 
 async def get_db():
     async with SessionLocal() as session:
@@ -23,6 +36,91 @@ class ResearchRequest(BaseModel):
 class ResearchResponse(BaseModel):
     id: str
     status: str
+    query: str | None = None
+
+
+def _ensure_job_owner(job: ResearchJob, user: dict) -> None:
+    if job.user_id != user["uid"]:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+
+async def _workspace_metadata(
+    repository: SQLiteResearchJobRepository | SQLiteResearchReportRepository,
+    entity_id: str | None,
+) -> dict:
+    if not entity_id:
+        return {}
+    metadata = await repository.get_workspace_metadata(entity_id)
+    return metadata if isinstance(metadata, dict) else {}
+
+
+def _chunk_credibility_score(chunk: object) -> float:
+    raw_score = getattr(chunk, "credibility_score", None)
+    if raw_score is None:
+        return 0.5
+    return float(raw_score)
+
+
+def build_evidence_items(chunks: list) -> list[EvidenceItem]:
+    evidence_items: list[EvidenceItem] = []
+    seen: set[tuple[str | None, str | None, str | None]] = set()
+
+    for chunk in chunks:
+        chunk_metadata = chunk.metadata if isinstance(chunk.metadata, dict) else {}
+        source = chunk_metadata.get("source") or "unknown"
+        title = chunk_metadata.get("title") or "Untitled source"
+        url = chunk_metadata.get("url")
+        key = (source, title, url)
+        if key in seen:
+            continue
+        seen.add(key)
+        evidence_items.append(
+            EvidenceItem(
+                source=source,
+                title=title,
+                url=url,
+                credibility_score=_chunk_credibility_score(chunk),
+                snippet=chunk_metadata.get("snippet") or getattr(chunk, "content", None),
+            )
+        )
+
+    return evidence_items
+
+
+def build_explainability_payload(metadata: dict) -> ExplainabilityPayload:
+    active_sources = metadata.get("active_sources", [])
+    if not isinstance(active_sources, list):
+        active_sources = []
+
+    query_refinements = metadata.get("query_refinements", [])
+    if not isinstance(query_refinements, list):
+        query_refinements = []
+
+    normalized_refinements: list[QueryRefinement] = []
+    for item in query_refinements:
+        if not isinstance(item, dict):
+            continue
+        source = item.get("source")
+        raw_query = item.get("raw_query")
+        enriched_query = item.get("enriched_query")
+        if not all(isinstance(value, str) and value for value in (source, raw_query, enriched_query)):
+            continue
+        normalized_refinements.append(
+            QueryRefinement(
+                source=source,
+                raw_query=raw_query,
+                enriched_query=enriched_query,
+            )
+        )
+
+    return ExplainabilityPayload(
+        active_sources=[source for source in active_sources if isinstance(source, str) and source],
+        query_refinements=normalized_refinements,
+    )
+
+
+def _normalize_pipeline_phase(candidate: object) -> str | None:
+    return candidate if isinstance(candidate, str) and candidate in PHASES else None
 
 @router.post("/", response_model=ResearchResponse)
 async def create_research(
@@ -32,17 +130,19 @@ async def create_research(
 ):
     job_repo = SQLiteResearchJobRepository(db)
     job = ResearchJob(query=request.query, user_id=user["uid"])
-    
+
     await job_repo.save(job)
-    
+    await db.commit()
+
     try:
-         run_research_pipeline.delay(job.id)
+        run_research_pipeline.delay(job.id)
     except Exception as e:
-         logging.error(f"Failed to queue task: {e}")
-         job = job.fail(error_message=str(e))
-         await job_repo.save(job)
-         
-    return ResearchResponse(id=job.id, status=job.status)
+        logging.error(f"Failed to queue task: {e}")
+        job = job.fail(error_message=str(e))
+        await job_repo.save(job)
+        await db.commit()
+
+    return ResearchResponse(id=job.id, status=job.status, query=job.query)
 
 @router.get("/", response_model=list[ResearchResponse])
 async def list_user_research(
@@ -56,7 +156,7 @@ async def list_user_research(
         .order_by(DBResearchJob.created_at.desc())
     )
     jobs = result.scalars().all()
-    return [ResearchResponse(id=j.id, status=j.status) for j in jobs]
+    return [ResearchResponse(id=j.id, status=j.status, query=j.query) for j in jobs]
 
 @router.get("/{job_id}", response_model=ResearchResponse)
 async def get_research_status(
@@ -68,19 +168,58 @@ async def get_research_status(
     job = await job_repo.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-        
-    return ResearchResponse(id=job.id, status=job.status)
+    _ensure_job_owner(job, user)
 
-@router.get("/{job_id}/report")
+    return ResearchResponse(id=job.id, status=job.status, query=job.query)
+
+@router.get("/{job_id}/report", response_model=ResearchWorkspaceResponse)
 async def get_research_report(
     job_id: str,
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
+    job_repo = SQLiteResearchJobRepository(db)
     report_repo = SQLiteResearchReportRepository(db)
+    job = await job_repo.get(job_id)
     report = await report_repo.get_by_job_id(job_id)
-    
-    if not report:
+
+    if not job or not report:
         raise HTTPException(status_code=404, detail="Report not ready yet or job failed.")
-        
-    return {"id": report.id, "job_id": report.job_id, "query": report.query, "markdown_content": report.markdown_content}
+    _ensure_job_owner(job, user)
+
+    workspace_metadata = {
+        **(await _workspace_metadata(job_repo, job.id)),
+        **(await _workspace_metadata(report_repo, report.id)),
+    }
+    workspace_metadata.setdefault("query", report.query)
+    evidence_chunks = []
+    if ChromaChunkRepository is not None:
+        try:
+            chunk_repo = ChromaChunkRepository()
+            evidence_chunks = await chunk_repo.search(job_id, query=report.query, top_k=10)
+        except Exception as exc:
+            logging.warning("Failed to load evidence for job %s: %s", job_id, exc)
+
+    pipeline_metadata = workspace_metadata.get("pipeline")
+    current_phase = None
+    phases = list(PHASES)
+    if isinstance(pipeline_metadata, dict):
+        current_phase = _normalize_pipeline_phase(pipeline_metadata.get("current_phase"))
+        stored_phases = pipeline_metadata.get("phases")
+        if isinstance(stored_phases, list) and all(isinstance(phase, str) for phase in stored_phases):
+            phases = stored_phases
+
+    if current_phase is None:
+        current_phase = _normalize_pipeline_phase(workspace_metadata.get("current_phase"))
+
+    return ResearchWorkspaceResponse(
+        id=report.id,
+        job_id=report.job_id,
+        query=report.query,
+        markdown_content=report.markdown_content,
+        domain=workspace_metadata.get("domain"),
+        format_label=workspace_metadata.get("format_label"),
+        pipeline=PipelinePayload(current_phase=current_phase, phases=phases),
+        evidence=build_evidence_items(evidence_chunks),
+        explainability=build_explainability_payload(workspace_metadata),
+    )

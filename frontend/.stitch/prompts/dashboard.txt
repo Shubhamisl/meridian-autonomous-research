@@ -1,0 +1,43 @@
+Design a premium desktop dashboard for Meridian, an autonomous research intelligence platform.
+
+Use the Meridian design system in ../DESIGN.md as the source of truth. This is an authenticated product dashboard for a React web app, not a marketing page.
+
+Overall vibe:
+Quiet authority, editorial intelligence, guided AI copilot, calm trust, high-end knowledge work.
+
+DESIGN SYSTEM (REQUIRED):
+- Platform: Web, desktop-first
+- Palette: Deep Ink (#0F172A), Midnight Slate (#1E293B), Cloud Ivory (#F8FAFC), Signal Teal (#0F766E), Progress Amber (#D97706)
+- Typography: editorial serif for major headings, clean grotesk sans for interface and metadata
+- Style: refined cards, disciplined spacing, premium editorial hierarchy, restrained motion
+- Avoid purple-heavy AI styling and cluttered admin dashboards
+
+PAGE STRUCTURE:
+1. **Top Navigation**
+- Meridian wordmark
+- lightweight nav items for Dashboard, Reports, Activity
+- search/history affordance
+- account menu
+
+2. **Primary Research Composer**
+- large natural-language input as the hero action
+- concise helper text explaining Meridian will classify, route, score, retrieve, and synthesize automatically
+- one prominent CTA to start research
+- advanced options hidden behind a subtle trigger, not open by default
+
+3. **Starter Research Modes**
+- elegant row or grid of starter prompt cards
+- include biomedical review, threat intelligence brief, market analysis, legal landscape, and general research
+- each card should feel premium and useful, not gimmicky
+
+4. **Recent Research Runs**
+- sophisticated status cards showing query title, domain, status, timestamp
+- status states should be visually distinct but restrained
+- cards should invite the user into the report workspace
+
+5. **Trust Band**
+- a thin visual section translating Meridian’s intelligence into plain language
+- phrases like “Classifies the domain”, “Routes the best sources”, “Scores evidence credibility”, “Builds the final report”
+
+UX GOAL:
+This dashboard should feel effortless and intelligent. It should make starting research feel easy while quietly communicating that Meridian is doing serious work behind the scenes.
