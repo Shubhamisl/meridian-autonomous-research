@@ -115,14 +115,13 @@ describe('ResearchDashboardPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /start research/i }));
 
     await waitFor(() => {
-      expect(mockedCreateResearchJob).toHaveBeenCalledWith(
-        getTokenMock,
-        'How should Meridian track this market?',
-      );
+      expect(navigateMock).toHaveBeenCalledWith('/workspace/job-789', {
+        state: { query: 'How should Meridian track this market?' },
+      });
     });
-
-    expect(navigateMock).toHaveBeenCalledWith('/workspace/job-789', {
-      state: { query: 'How should Meridian track this market?' },
-    });
+    expect(mockedCreateResearchJob).toHaveBeenCalledWith(
+      getTokenMock,
+      'How should Meridian track this market?',
+    );
   });
 });
