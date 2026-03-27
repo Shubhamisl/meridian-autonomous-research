@@ -1,4 +1,5 @@
 import os
+import logging
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
@@ -10,6 +11,7 @@ except ImportError:
     credentials = None
     auth = None
 
+logger = logging.getLogger(__name__)
 
 _firebase_admin_service_account_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
 _firebase_admin_service_account_available = bool(
@@ -72,6 +74,10 @@ def _initialize_firebase_admin() -> None:
         # Leave Firebase Admin uninitialized so runtime checks can report setup issues.
         _firebase_admin_initialization_succeeded = False
         _firebase_admin_initialization_error = _format_initialization_error(exc)
+        logger.warning(
+            "Firebase Admin initialization failed: %s",
+            _firebase_admin_initialization_error,
+        )
         return
 
 
@@ -89,12 +95,9 @@ async def get_current_user(
             detail="Firebase auth is not available in this environment",
         )
     if not _firebase_admin_initialization_succeeded:
-        detail = "Firebase Admin is not initialized in this environment"
-        if _firebase_admin_initialization_error:
-            detail = f"{detail}: {_firebase_admin_initialization_error}"
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=detail,
+            detail="Firebase Admin is not initialized in this environment",
         )
     token = credentials.credentials
     try:
