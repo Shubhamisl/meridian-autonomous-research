@@ -39,6 +39,11 @@ class ResearchResponse(BaseModel):
     query: str | None = None
 
 
+def _ensure_job_owner(job: ResearchJob, user: dict) -> None:
+    if job.user_id != user["uid"]:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+
 async def _workspace_metadata(
     repository: SQLiteResearchJobRepository | SQLiteResearchReportRepository,
     entity_id: str | None,
@@ -163,7 +168,8 @@ async def get_research_status(
     job = await job_repo.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-        
+    _ensure_job_owner(job, user)
+
     return ResearchResponse(id=job.id, status=job.status, query=job.query)
 
 @router.get("/{job_id}/report", response_model=ResearchWorkspaceResponse)
@@ -176,9 +182,10 @@ async def get_research_report(
     report_repo = SQLiteResearchReportRepository(db)
     job = await job_repo.get(job_id)
     report = await report_repo.get_by_job_id(job_id)
-    
+
     if not job or not report:
         raise HTTPException(status_code=404, detail="Report not ready yet or job failed.")
+    _ensure_job_owner(job, user)
 
     workspace_metadata = {
         **(await _workspace_metadata(job_repo, job.id)),

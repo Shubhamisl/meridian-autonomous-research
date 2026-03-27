@@ -9,9 +9,7 @@ import { useAuth } from '../contexts/useAuth';
 import {
   createResearchJob,
   fetchResearchJobs,
-  fetchResearchReport,
   type ResearchJobSummary,
-  type ResearchReport,
 } from '../lib/api';
 
 export default function ResearchDashboardPage() {
@@ -19,7 +17,6 @@ export default function ResearchDashboardPage() {
   const { getToken } = useAuth();
   const [query, setQuery] = useState('');
   const [jobs, setJobs] = useState<ResearchJobSummary[]>([]);
-  const [reports, setReports] = useState<Record<string, ResearchReport>>({});
   const [localQueries, setLocalQueries] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
 
@@ -41,27 +38,13 @@ export default function ResearchDashboardPage() {
     return () => window.clearInterval(interval);
   }, [loadJobs]);
 
-  useEffect(() => {
-    jobs.forEach((job) => {
-      if (job.status !== 'completed' || reports[job.id]) return;
-
-      void fetchResearchReport(getToken, job.id)
-        .then((report) => {
-          setReports((current) => ({ ...current, [job.id]: report }));
-        })
-        .catch(() => {
-          // Older or unavailable jobs can remain without report preview data.
-        });
-    });
-  }, [getToken, jobs, reports]);
-
   const displayJobs = useMemo(
     () =>
       jobs.map((job) => ({
         ...job,
-        query: reports[job.id]?.query ?? localQueries[job.id] ?? job.query,
+        query: localQueries[job.id] ?? job.query,
       })),
-    [jobs, localQueries, reports],
+    [jobs, localQueries],
   );
 
   const handleSubmit = useCallback(async () => {

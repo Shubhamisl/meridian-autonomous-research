@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import ResearchDashboardPage from '../ResearchDashboardPage';
 import { renderWithProviders } from '../../test/render-with-providers';
-import { createResearchJob, fetchResearchJobs, fetchResearchReport } from '../../lib/api';
+import { createResearchJob, fetchResearchJobs } from '../../lib/api';
 import { useNavigate } from 'react-router-dom';
 
 const navigateMock = vi.fn();
@@ -29,7 +29,6 @@ vi.mock('../../lib/api', async (importOriginal) => {
     ...actual,
     createResearchJob: vi.fn(),
     fetchResearchJobs: vi.fn(),
-    fetchResearchReport: vi.fn(),
   };
 });
 
@@ -43,7 +42,6 @@ vi.mock('react-router-dom', async (importOriginal) => {
 });
 
 const mockedFetchResearchJobs = vi.mocked(fetchResearchJobs);
-const mockedFetchResearchReport = vi.mocked(fetchResearchReport);
 const mockedCreateResearchJob = vi.mocked(createResearchJob);
 const mockedUseNavigate = vi.mocked(useNavigate);
 
@@ -54,14 +52,13 @@ describe('ResearchDashboardPage', () => {
       getToken: getTokenMock,
     };
     mockedFetchResearchJobs.mockReset();
-    mockedFetchResearchReport.mockReset();
     mockedCreateResearchJob.mockReset();
     navigateMock.mockReset();
     mockedUseNavigate.mockReturnValue(navigateMock);
     getTokenMock.mockResolvedValue('token-123');
   });
 
-  it('renders recent jobs from the API and preserves job query fallback behavior', async () => {
+  it('renders recent jobs from the API and preserves the listed query values', async () => {
     mockedFetchResearchJobs.mockResolvedValue([
       {
         id: 'job-pending',
@@ -74,29 +71,11 @@ describe('ResearchDashboardPage', () => {
         query: 'Summary query from API',
       },
     ]);
-    mockedFetchResearchReport.mockResolvedValueOnce({
-      id: 'workspace-job-completed',
-      job_id: 'job-completed',
-      query: 'Completed query from report',
-      markdown_content: '# Report',
-      domain: null,
-      format_label: null,
-      pipeline: {
-        current_phase: 'synthesis',
-        phases: ['ingestion', 'synthesis'],
-      },
-      evidence: [],
-      explainability: {
-        active_sources: [],
-        query_refinements: [],
-      },
-    });
 
     renderWithProviders(<ResearchDashboardPage />);
 
     expect(await screen.findByText('Pending query from API')).toBeInTheDocument();
-    expect(await screen.findByText('Completed query from report')).toBeInTheDocument();
-    expect(mockedFetchResearchReport).toHaveBeenCalledWith(getTokenMock, 'job-completed');
+    expect(await screen.findByText('Summary query from API')).toBeInTheDocument();
   });
 
   it('navigates to the workspace when job creation succeeds', async () => {

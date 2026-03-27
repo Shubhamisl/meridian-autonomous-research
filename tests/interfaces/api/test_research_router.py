@@ -227,6 +227,32 @@ async def test_get_research_report_preserves_zero_credibility_scores(client, mon
 
 
 @pytest.mark.asyncio
+async def test_get_research_status_rejects_non_owner(client):
+    async def override_get_current_user():
+        return {"uid": "user-456", "email": "other@example.com"}
+
+    app.dependency_overrides[get_current_user] = override_get_current_user
+
+    response = await client.get("/research/job-123", headers=auth_headers())
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Job not found"
+
+
+@pytest.mark.asyncio
+async def test_get_research_report_rejects_non_owner(client):
+    async def override_get_current_user():
+        return {"uid": "user-456", "email": "other@example.com"}
+
+    app.dependency_overrides[get_current_user] = override_get_current_user
+
+    response = await client.get("/research/job-123/report", headers=auth_headers())
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Job not found"
+
+
+@pytest.mark.asyncio
 async def test_create_research_commits_job_before_queue_dispatch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     db_path = tmp_path / "research-router-create.db"
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}")
