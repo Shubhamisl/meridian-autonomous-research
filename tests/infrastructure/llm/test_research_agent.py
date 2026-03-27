@@ -1,3 +1,5 @@
+import json
+import logging
 import sys
 import types
 
@@ -87,53 +89,114 @@ class FakeSourceClient:
         return [self.document]
 
 
-def _finish_and_tool_call(tool_name: str):
+class FakeQueryProcessor:
+    def __init__(self, enriched_query="enriched query"):
+        self.enriched_query = enriched_query
+        self.calls = []
+
+    def enrich(self, raw_query, domain, source):
+        self.calls.append((raw_query, domain, source))
+        return self.enriched_query
+
+
+def _finish_and_tool_call(tool_name: str, query: str = "cancer"):
     return FakeResponse(
         [
-            FakeToolCall("1", tool_name, "{\"query\": \"cancer\"}"),
+            FakeToolCall("1", tool_name, json.dumps({"query": query})),
             FakeToolCall("2", "finish_research", "{\"summary\": \"done\"}"),
         ]
     )
 
 
 @pytest.mark.asyncio
-async def test_research_agent_stores_classified_domain_and_uses_router_tools():
-    tools = [{"type": "function", "function": {"name": "search_pubmed", "parameters": {"type": "object"}}}]
+async def test_research_agent_enriches_query_before_dispatching_search():
+    tools = [{"type": "function", "function": {"name": "search_arxiv", "parameters": {"type": "object"}}}]
     classifier = FakeClassifier("biomedical")
     router = FakeRouter(tools)
-    llm = FakeLLM([_finish_and_tool_call("search_pubmed")])
-    agent = ResearchAgent(llm, domain_classifier=classifier, source_router=router)
-    agent.pubmed_client = FakeSourceClient(Document(source="pubmed", title="PubMed", content="PubMed content", url="https://pubmed.ncbi.nlm.nih.gov/12345/"))
+    llm = FakeLLM([_finish_and_tool_call("search_arxiv")])
+    query_processor = FakeQueryProcessor(enriched_query='"quoted" enriched query')
+    client = FakeSourceClient(
+        Document(source="arxiv", title="ArXiv Title", content="ArXiv abstract", url="https://example.com")
+    )
+
+    agent = ResearchAgent(
+        llm,
+        domain_classifier=classifier,
+        source_router=router,
+        arxiv_client=client,
+        query_processor=query_processor,
+    )
 
     await agent.run("cancer", max_iterations=1)
 
-    assert agent.domain == "biomedical"
-    assert classifier.calls == ["cancer"]
-    assert router.calls == ["biomedical"]
-    assert llm.calls[0]["tools"] == tools
+    assert query_processor.calls == [("cancer", "biomedical", "arxiv")]
+    assert client.calls == ['"quoted" enriched query']
 
 
 @pytest.mark.asyncio
-async def test_research_agent_dispatches_pubmed_to_injected_client():
-    tools = [{"type": "function", "function": {"name": "search_pubmed", "parameters": {"type": "object"}}}]
-    classifier = FakeClassifier("biomedical")
+async def test_research_agent_system_prompt_mentions_search_operators():
+    tools = [{"type": "function", "function": {"name": "finish_research", "parameters": {"type": "object"}}}]
+    classifier = FakeClassifier("general")
     router = FakeRouter(tools)
-    llm = FakeLLM([_finish_and_tool_call("search_pubmed")])
+    llm = FakeLLM([FakeResponse([])])
+
     agent = ResearchAgent(llm, domain_classifier=classifier, source_router=router)
-    pubmed_client = FakeSourceClient(
-        Document(
-            source="pubmed",
-            title="PubMed Title",
-            content="PubMed abstract",
-            url="https://pubmed.ncbi.nlm.nih.gov/12345/",
-        )
+
+    await agent.run("cancer", max_iterations=1)
+
+    system_prompt = llm.calls[0]["messages"][0]["content"]
+    assert "after:YYYY-MM-DD" in system_prompt
+    assert "intitle:" in system_prompt
+    assert "-site:" in system_prompt
+    assert "quoted phrases" in system_prompt
+    assert "combining operators" in system_prompt
+
+
+@pytest.mark.asyncio
+async def test_research_agent_logs_raw_and_enriched_queries_at_debug(caplog):
+    tools = [{"type": "function", "function": {"name": "search_web", "parameters": {"type": "object"}}}]
+    classifier = FakeClassifier("general")
+    router = FakeRouter(tools)
+    llm = FakeLLM([_finish_and_tool_call("search_web")])
+    query_processor = FakeQueryProcessor(enriched_query="enriched web query")
+    client = FakeSourceClient(
+        Document(source="web", title="Web Title", content="Web body", url="https://example.com")
     )
-    agent.pubmed_client = pubmed_client
 
-    documents = await agent.run("cancer", max_iterations=1)
+    agent = ResearchAgent(
+        llm,
+        domain_classifier=classifier,
+        source_router=router,
+        web_search_client=client,
+        query_processor=query_processor,
+    )
 
-    assert pubmed_client.calls == ["cancer"]
-    assert len(documents) == 1
-    assert documents[0].source == "pubmed"
-    assert documents[0].title == "PubMed Title"
-    assert documents[0].content == "PubMed abstract"
+    caplog.set_level(logging.DEBUG)
+    await agent.run("cancer", max_iterations=1)
+
+    assert any("raw query='cancer'" in record.message for record in caplog.records)
+    assert any("enriched query='enriched web query'" in record.message for record in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_research_agent_normalizes_search_arxiv_to_source_label():
+    tools = [{"type": "function", "function": {"name": "search_arxiv", "parameters": {"type": "object"}}}]
+    classifier = FakeClassifier("general")
+    router = FakeRouter(tools)
+    llm = FakeLLM([_finish_and_tool_call("search_arxiv")])
+    query_processor = FakeQueryProcessor(enriched_query="normalized query")
+    client = FakeSourceClient(
+        Document(source="arxiv", title="ArXiv Title", content="ArXiv abstract", url="https://example.com")
+    )
+
+    agent = ResearchAgent(
+        llm,
+        domain_classifier=classifier,
+        source_router=router,
+        arxiv_client=client,
+        query_processor=query_processor,
+    )
+
+    await agent.run("cancer", max_iterations=1)
+
+    assert query_processor.calls == [("cancer", "general", "arxiv")]

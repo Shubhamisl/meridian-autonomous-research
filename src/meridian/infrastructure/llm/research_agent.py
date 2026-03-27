@@ -1,6 +1,8 @@
+import logging
 import json
 from typing import List
 
+from src.meridian.application.pipeline.query_processor import QueryProcessor
 from src.meridian.application.pipeline.domain_classifier import DomainClassifier
 from src.meridian.application.pipeline.source_router import SourceRouter
 from src.meridian.domain.entities import Document
@@ -11,6 +13,9 @@ from src.meridian.infrastructure.external_apis.semantic_scholar_client import Se
 from src.meridian.infrastructure.external_apis.web_search_client import WebSearchClient
 from src.meridian.infrastructure.external_apis.wikipedia_client import WikipediaClient
 from src.meridian.infrastructure.llm.openrouter_client import OpenRouterClient
+
+
+logger = logging.getLogger(__name__)
 
 
 class ResearchAgent:
@@ -25,6 +30,7 @@ class ResearchAgent:
         pubmed_client: PubMedClient | None = None,
         ieee_client: IEEEClient | None = None,
         semantic_scholar_client: SemanticScholarClient | None = None,
+        query_processor: QueryProcessor | None = None,
     ):
         self.llm = openrouter_client
         self.domain_classifier = domain_classifier or DomainClassifier(openrouter_client)
@@ -35,6 +41,7 @@ class ResearchAgent:
         self.pubmed_client = pubmed_client or PubMedClient()
         self.ieee_client = ieee_client or IEEEClient()
         self.semantic_scholar_client = semantic_scholar_client or SemanticScholarClient()
+        self.query_processor = query_processor or QueryProcessor()
         self.domain = "general"
 
     async def run(self, topic: str, max_iterations: int = 5) -> List[Document]:
@@ -48,7 +55,9 @@ class ResearchAgent:
                     "You are an autonomous research intelligence agent. Your job is to "
                     "iteratively search the available sources to gather sufficient "
                     "information to write a comprehensive report on the user's query. "
-                    "When you have enough context, call finish_research."
+                    "When you have enough context, call finish_research. "
+                    "Use search operators such as after:YYYY-MM-DD, intitle:, -site:, "
+                    "quoted phrases, and combining operators when they improve recall."
                 ),
             },
             {"role": "user", "content": f"Please research the following topic: {topic}"},
@@ -72,24 +81,35 @@ class ResearchAgent:
                 getattr(result, "content", getattr(result, "summary", getattr(result, "body", ""))),
             )
 
+        def _source_label(tool_name: str) -> str:
+            mapping = {
+                "search_web": "web",
+                "search_arxiv": "arxiv",
+                "search_pubmed": "pubmed",
+                "search_ieee": "ieee",
+                "search_semantic_scholar": "semantic_scholar",
+                "search_wikipedia": "wikipedia",
+            }
+            return mapping.get(tool_name, tool_name.removeprefix("search_"))
+
         async def _run_search(client, query: str):
             if client is None:
                 return []
             return await client.search(query)
 
-        async def _dispatch_search(tool_name: str, query: str):
-            match tool_name:
-                case "search_wikipedia":
+        async def _dispatch_search(source: str, query: str):
+            match source:
+                case "wikipedia":
                     return await _run_search(self.wikipedia_client, query)
-                case "search_arxiv":
+                case "arxiv":
                     return await _run_search(self.arxiv_client, query)
-                case "search_web":
+                case "web":
                     return await _run_search(self.web_search_client, query)
-                case "search_pubmed":
+                case "pubmed":
                     return await _run_search(self.pubmed_client, query)
-                case "search_ieee":
+                case "ieee":
                     return await _run_search(self.ieee_client, query)
-                case "search_semantic_scholar":
+                case "semantic_scholar":
                     return await _run_search(self.semantic_scholar_client, query)
                 case _:
                     return []
@@ -116,7 +136,16 @@ class ResearchAgent:
                     all_finished = True
                     tool_result_content = "Research successfully concluded. Proceed to generation."
                 else:
-                    results = await _dispatch_search(func_name, args.get("query", topic))
+                    raw_query = args.get("query", topic)
+                    source = _source_label(func_name)
+                    enriched_query = self.query_processor.enrich(raw_query, self.domain, source)
+                    logger.debug(
+                        "Dispatching search for %s with raw query=%r enriched query=%r",
+                        source,
+                        raw_query,
+                        enriched_query,
+                    )
+                    results = await _dispatch_search(source, enriched_query)
                     tool_result_content = json.dumps([_document_payload(r) for r in results])
                     for r in results:
                         source, url, title, content = _result_fields(r)
