@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useParams } from 'react-router-dom';
 
 import EvidencePlaceholder from '../components/detail/EvidencePlaceholder';
@@ -27,18 +27,27 @@ export default function ResearchWorkspacePage() {
   const [status, setStatus] = useState('pending');
   const [workspace, setWorkspace] = useState<ResearchWorkspacePayload | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const requestSequenceRef = useRef(0);
 
   const query = workspace?.query ?? jobQuery ?? 'Research inquiry';
 
   const loadWorkspace = useCallback(async () => {
+    const requestId = ++requestSequenceRef.current;
+
     try {
       const nextStatus = await fetchResearchStatus(getToken, jobId);
+      if (requestId !== requestSequenceRef.current) return;
+
       setStatus(nextStatus.status);
       setJobQuery(nextStatus.query ?? initialQuery);
 
       if (nextStatus.status === 'completed') {
         const nextReport = await fetchResearchReport(getToken, jobId);
+        if (requestId !== requestSequenceRef.current) return;
+
         setWorkspace(nextReport);
+      } else if (nextStatus.status === 'failed') {
+        setWorkspace(null);
       } else {
         setWorkspace(null);
       }
@@ -49,6 +58,7 @@ export default function ResearchWorkspacePage() {
         setLoadError(null);
       }
     } catch {
+      if (requestId !== requestSequenceRef.current) return;
       setLoadError('This workspace could not be loaded right now.');
     }
   }, [getToken, initialQuery, jobId]);
@@ -58,15 +68,31 @@ export default function ResearchWorkspacePage() {
       void loadWorkspace();
     }, 0);
 
+    return () => {
+      window.clearTimeout(initialLoad);
+    };
+  }, [loadWorkspace]);
+
+  useEffect(() => {
+    return () => {
+      requestSequenceRef.current += 1;
+    };
+  }, []);
+
+  useEffect(() => {
+    const shouldPoll = status !== 'failed' && !(status === 'completed' && workspace);
+    if (!shouldPoll) {
+      return undefined;
+    }
+
     const interval = window.setInterval(() => {
       void loadWorkspace();
     }, 5000);
 
     return () => {
-      window.clearTimeout(initialLoad);
       window.clearInterval(interval);
     };
-  }, [loadWorkspace]);
+  }, [loadWorkspace, status, workspace]);
 
   return (
     <AppShell>

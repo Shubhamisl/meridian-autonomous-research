@@ -26,6 +26,7 @@ export default function PipelineTimeline({ phases, currentPhase }: PipelineTimel
               const isCurrent = currentIndex === index;
               const isComplete = currentIndex >= 0 && index < currentIndex;
               const active = isCurrent || isComplete;
+              const connectorActive = currentIndex > index;
 
               return (
                 <div className="flex flex-1 items-start gap-0" key={phase}>
@@ -50,7 +51,7 @@ export default function PipelineTimeline({ phases, currentPhase }: PipelineTimel
                     </span>
                   </div>
                   {index < timelinePhases.length - 1 && (
-                    <div className={`mt-4 h-px flex-1 ${active ? 'bg-teal/25' : 'bg-fog/70'}`} />
+                    <div className={`mt-4 h-px flex-1 ${connectorActive ? 'bg-teal/25' : 'bg-fog/70'}`} />
                   )}
                 </div>
               );

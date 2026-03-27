@@ -13,8 +13,8 @@ export interface ResearchWorkspaceEvidenceItem {
   source: string;
   title: string;
   credibility_score: number;
-  snippet?: string | null;
-  url?: string | null;
+  snippet: string | null;
+  url: string | null;
 }
 
 export interface ResearchWorkspaceQueryRefinement {
@@ -33,8 +33,8 @@ export interface ResearchWorkspacePayload {
   job_id: string;
   query: string;
   markdown_content: string;
-  domain?: string | null;
-  format_label?: string | null;
+  domain: string | null;
+  format_label: string | null;
   pipeline: ResearchWorkspacePipeline;
   evidence: ResearchWorkspaceEvidenceItem[];
   explainability: ResearchWorkspaceExplainability;
