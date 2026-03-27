@@ -1,8 +1,9 @@
 import json
 from typing import Any, Optional
 
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from src.meridian.domain.entities import ResearchJob, ResearchReport
 from src.meridian.domain.repositories import ResearchJobRepository, ResearchReportRepository
 from src.meridian.infrastructure.database.models import DBResearchJob, DBResearchReport
@@ -57,7 +58,7 @@ class SQLiteResearchJobRepository(ResearchJobRepository):
         db_job.error_message = job.error_message
 
         self.session.add(db_job)
-        await self.session.commit()
+        await self.session.flush()
 
     async def get_workspace_metadata(self, job_id: str) -> dict[str, Any]:
         db_job = await self.session.get(DBResearchJob, job_id)
@@ -71,7 +72,7 @@ class SQLiteResearchJobRepository(ResearchJobRepository):
             raise ValueError(f"Research job {job_id} not found")
         db_job.workspace_metadata = _encode_metadata(metadata)
         self.session.add(db_job)
-        await self.session.commit()
+        await self.session.flush()
 
 class SQLiteResearchReportRepository(ResearchReportRepository):
     def __init__(self, session: AsyncSession):
@@ -103,7 +104,7 @@ class SQLiteResearchReportRepository(ResearchReportRepository):
         db_report.created_at = report.created_at
 
         self.session.add(db_report)
-        await self.session.commit()
+        await self.session.flush()
 
     async def get_workspace_metadata(self, report_id: str) -> dict[str, Any]:
         db_report = await self.session.get(DBResearchReport, report_id)
@@ -117,4 +118,4 @@ class SQLiteResearchReportRepository(ResearchReportRepository):
             raise ValueError(f"Research report {report_id} not found")
         db_report.workspace_metadata = _encode_metadata(metadata)
         self.session.add(db_report)
-        await self.session.commit()
+        await self.session.flush()

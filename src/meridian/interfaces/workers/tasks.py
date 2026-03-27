@@ -1,5 +1,39 @@
 import asyncio
+
+try:
+    from celery.signals import worker_process_init
+except ModuleNotFoundError:
+    class _WorkerProcessInitStub:
+        def connect(self, func):
+            return func
+
+    worker_process_init = _WorkerProcessInitStub()
+
 from src.meridian.interfaces.workers.app import celery_app
+
+_database_bootstrap_lock = asyncio.Lock()
+_database_bootstrapped = False
+
+
+async def ensure_database_bootstrapped() -> None:
+    global _database_bootstrapped
+
+    if _database_bootstrapped:
+        return
+
+    from src.meridian.infrastructure.database.session import init_db
+
+    async with _database_bootstrap_lock:
+        if _database_bootstrapped:
+            return
+
+        await init_db()
+        _database_bootstrapped = True
+
+
+@worker_process_init.connect
+def _bootstrap_worker_process(**_kwargs):
+    asyncio.run(ensure_database_bootstrapped())
 
 async def _run_job_async(job_id: str):
     from src.meridian.application.pipeline.orchestrator import PipelineOrchestrator
@@ -9,7 +43,7 @@ async def _run_job_async(job_id: str):
     from src.meridian.application.pipeline.format_selector import FormatSelector
     from src.meridian.application.pipeline.query_processor import QueryProcessor
     from src.meridian.application.pipeline.source_router import SourceRouter
-    from src.meridian.infrastructure.database.session import SessionLocal, init_db
+    from src.meridian.infrastructure.database.session import SessionLocal
     from src.meridian.infrastructure.database.sqlite_repositories import (
         SQLiteResearchJobRepository,
         SQLiteResearchReportRepository,
@@ -25,7 +59,7 @@ async def _run_job_async(job_id: str):
     from src.meridian.infrastructure.llm.synthesizer import ReportSynthesizer
     from src.meridian.infrastructure.vector_store.chroma_repository import ChromaChunkRepository
 
-    await init_db()
+    await ensure_database_bootstrapped()
 
     async with SessionLocal() as session:
         job_repo = SQLiteResearchJobRepository(session)
@@ -68,6 +102,7 @@ async def _run_job_async(job_id: str):
             synthesizer=synthesizer,
             chunking_service=chunking_service,
             format_selector=format_selector,
+            transaction_manager=session,
         )
 
         await orchestrator.run_pipeline(job_id)

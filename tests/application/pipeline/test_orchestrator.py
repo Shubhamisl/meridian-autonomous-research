@@ -99,6 +99,36 @@ class FakeFormatSelector:
         return self.label
 
 
+class FakeTransaction:
+    def __init__(self, events):
+        self.events = events
+
+    async def __aenter__(self):
+        self.events.append("begin")
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        self.events.append(("end", exc_type.__name__ if exc_type else None))
+        return False
+
+
+class FakeTransactionManager:
+    def __init__(self):
+        self.events = []
+
+    async def commit(self):
+        self.events.append("commit")
+
+    def begin(self):
+        return FakeTransaction(self.events)
+
+
+class FailingReportRepo(FakeReportRepo):
+    async def save(self, report):
+        await super().save(report)
+        raise RuntimeError("report save failed")
+
+
 @pytest.mark.asyncio
 async def test_run_pipeline_uses_chunking_service_logs_document_summary_and_passes_format_label(monkeypatch, caplog):
     fake_research_agent_module = types.ModuleType("src.meridian.infrastructure.llm.research_agent")
@@ -311,3 +341,91 @@ async def test_run_pipeline_persists_workspace_metadata_via_explicit_stores(monk
     assert report_metadata_store.metadata_by_id[report.id]["domain"] == "computer_science"
     assert report_metadata_store.metadata_by_id[report.id]["format_label"] == "osint"
     assert report_metadata_store.metadata_by_id[report.id]["pipeline"]["current_phase"] == "synthesize"
+
+
+@pytest.mark.asyncio
+async def test_run_pipeline_groups_final_success_writes_in_one_transaction(monkeypatch):
+    fake_research_agent_module = types.ModuleType("src.meridian.infrastructure.llm.research_agent")
+    fake_research_agent_module.ResearchAgent = object
+    fake_synthesizer_module = types.ModuleType("src.meridian.infrastructure.llm.synthesizer")
+    fake_synthesizer_module.ReportSynthesizer = object
+    monkeypatch.setitem(sys.modules, "src.meridian.infrastructure.llm.research_agent", fake_research_agent_module)
+    monkeypatch.setitem(sys.modules, "src.meridian.infrastructure.llm.synthesizer", fake_synthesizer_module)
+
+    orchestrator_module = importlib.import_module("src.meridian.application.pipeline.orchestrator")
+    PipelineOrchestrator = orchestrator_module.PipelineOrchestrator
+
+    job = ResearchJob(query="atomic success")
+    document = Document(source="web", url="https://example.com", title="Atomic", content="content")
+    chunk = Chunk(document_id=document.id, content="service chunk", credibility_score=0.87)
+    transaction_manager = FakeTransactionManager()
+
+    orchestrator = PipelineOrchestrator(
+        job_repo=FakeJobRepo(job),
+        report_repo=FakeReportRepo(),
+        chunk_repo=FakeChunkRepo(),
+        agent=FakeAgent([document]),
+        synthesizer=FakeSynthesizer(),
+        chunking_service=FakeChunkingService([chunk]),
+        format_selector=FakeFormatSelector("general"),
+        job_metadata_store=FakeWorkspaceMetadataStore(),
+        report_metadata_store=FakeWorkspaceMetadataStore(),
+        transaction_manager=transaction_manager,
+    )
+
+    await orchestrator.run_pipeline(job.id)
+
+    assert transaction_manager.events == [
+        "commit",
+        "commit",
+        "commit",
+        "commit",
+        "begin",
+        ("end", None),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_run_pipeline_records_failure_in_single_transaction(monkeypatch):
+    fake_research_agent_module = types.ModuleType("src.meridian.infrastructure.llm.research_agent")
+    fake_research_agent_module.ResearchAgent = object
+    fake_synthesizer_module = types.ModuleType("src.meridian.infrastructure.llm.synthesizer")
+    fake_synthesizer_module.ReportSynthesizer = object
+    monkeypatch.setitem(sys.modules, "src.meridian.infrastructure.llm.research_agent", fake_research_agent_module)
+    monkeypatch.setitem(sys.modules, "src.meridian.infrastructure.llm.synthesizer", fake_synthesizer_module)
+
+    orchestrator_module = importlib.import_module("src.meridian.application.pipeline.orchestrator")
+    PipelineOrchestrator = orchestrator_module.PipelineOrchestrator
+
+    job = ResearchJob(query="atomic failure")
+    document = Document(source="web", url="https://example.com", title="Atomic", content="content")
+    chunk = Chunk(document_id=document.id, content="service chunk", credibility_score=0.87)
+    job_repo = FakeJobRepo(job)
+    transaction_manager = FakeTransactionManager()
+
+    orchestrator = PipelineOrchestrator(
+        job_repo=job_repo,
+        report_repo=FailingReportRepo(),
+        chunk_repo=FakeChunkRepo(),
+        agent=FakeAgent([document]),
+        synthesizer=FakeSynthesizer(),
+        chunking_service=FakeChunkingService([chunk]),
+        format_selector=FakeFormatSelector("general"),
+        job_metadata_store=FakeWorkspaceMetadataStore(),
+        report_metadata_store=FakeWorkspaceMetadataStore(),
+        transaction_manager=transaction_manager,
+    )
+
+    await orchestrator.run_pipeline(job.id)
+
+    assert job_repo.job.status == "failed"
+    assert transaction_manager.events == [
+        "commit",
+        "commit",
+        "commit",
+        "commit",
+        "begin",
+        ("end", "RuntimeError"),
+        "begin",
+        ("end", None),
+    ]

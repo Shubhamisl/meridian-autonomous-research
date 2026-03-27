@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 import logging
 from typing import Any, Protocol
 
@@ -16,6 +17,14 @@ class WorkspaceMetadataStore(Protocol):
         ...
 
     async def save_workspace_metadata(self, entity_id: str, metadata: dict[str, Any]) -> None:
+        ...
+
+
+class TransactionManager(Protocol):
+    async def commit(self) -> None:
+        ...
+
+    def begin(self):
         ...
 
 
@@ -77,6 +86,7 @@ class PipelineOrchestrator:
         synthesizer: ReportSynthesizer,
         chunking_service: ChunkingService,
         format_selector: FormatSelector,
+        transaction_manager: TransactionManager | None = None,
     ):
         self.job_repo = job_repo
         self.report_repo = report_repo
@@ -87,6 +97,20 @@ class PipelineOrchestrator:
         self.synthesizer = synthesizer
         self.chunking_service = chunking_service
         self.format_selector = format_selector
+        self.transaction_manager = transaction_manager
+
+    async def _commit_pending(self) -> None:
+        if self.transaction_manager is not None:
+            await self.transaction_manager.commit()
+
+    @asynccontextmanager
+    async def _transaction(self):
+        if self.transaction_manager is None:
+            yield
+            return
+
+        async with self.transaction_manager.begin():
+            yield
 
     async def run_pipeline(self, job_id: str):
         job = await self.job_repo.get(job_id)
@@ -99,6 +123,7 @@ class PipelineOrchestrator:
             job = job.start()
             await self.job_repo.save(job)
             await self.job_metadata_store.save_workspace_metadata(job.id, workspace_metadata)
+            await self._commit_pending()
 
             documents = await self.agent.run(topic=job.query)
             workspace_metadata["domain"] = getattr(self.agent, "domain", "general")
@@ -114,6 +139,8 @@ class PipelineOrchestrator:
             )
 
             _update_pipeline_phase(workspace_metadata, "chunk")
+            await self.job_metadata_store.save_workspace_metadata(job.id, workspace_metadata)
+            await self._commit_pending()
             all_chunks = await self.chunking_service.chunk_documents(documents)
             for document in documents:
                 document_chunks = [chunk for chunk in all_chunks if chunk.document_id == document.id]
@@ -129,6 +156,8 @@ class PipelineOrchestrator:
             await self.chunk_repo.save_all(job_id, all_chunks)
 
             _update_pipeline_phase(workspace_metadata, "retrieve")
+            await self.job_metadata_store.save_workspace_metadata(job.id, workspace_metadata)
+            await self._commit_pending()
             retrieved_chunks = await self.chunk_repo.search(job_id, query=job.query, top_k=10)
 
             if not retrieved_chunks:
@@ -139,6 +168,8 @@ class PipelineOrchestrator:
             logger.info("Selected report format: %s", format_label)
             workspace_metadata["format_label"] = format_label
             _update_pipeline_phase(workspace_metadata, "synthesize")
+            await self.job_metadata_store.save_workspace_metadata(job.id, workspace_metadata)
+            await self._commit_pending()
 
             report = await self.synthesizer.synthesize(
                 job_id,
@@ -146,15 +177,17 @@ class PipelineOrchestrator:
                 retrieved_chunks,
                 format_label=format_label,
             )
-            await self.report_repo.save(report)
-            await self.report_metadata_store.save_workspace_metadata(report.id, workspace_metadata)
+            async with self._transaction():
+                await self.report_repo.save(report)
+                await self.report_metadata_store.save_workspace_metadata(report.id, workspace_metadata)
 
-            job = job.complete()
-            await self.job_repo.save(job)
-            await self.job_metadata_store.save_workspace_metadata(job.id, workspace_metadata)
+                job = job.complete()
+                await self.job_repo.save(job)
+                await self.job_metadata_store.save_workspace_metadata(job.id, workspace_metadata)
             return report
 
         except Exception as e:
-            job = job.fail(error_message=str(e))
-            await self.job_repo.save(job)
-            await self.job_metadata_store.save_workspace_metadata(job.id, workspace_metadata)
+            async with self._transaction():
+                job = job.fail(error_message=str(e))
+                await self.job_repo.save(job)
+                await self.job_metadata_store.save_workspace_metadata(job.id, workspace_metadata)

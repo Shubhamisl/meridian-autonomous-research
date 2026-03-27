@@ -215,6 +215,7 @@ async def test_run_job_async_runs_init_db_before_wiring_dependencies(monkeypatch
     monkeypatch.setitem(sys.modules, "src.meridian.infrastructure.llm.research_agent", fake_research_agent_module)
     monkeypatch.setitem(sys.modules, "src.meridian.infrastructure.llm.synthesizer", fake_synthesizer_module)
     monkeypatch.setitem(sys.modules, "src.meridian.application.pipeline.orchestrator", fake_orchestrator_module)
+    monkeypatch.setattr(tasks, "_database_bootstrapped", False)
 
     await tasks._run_job_async("job-123")
 
@@ -243,3 +244,22 @@ async def test_run_job_async_runs_init_db_before_wiring_dependencies(monkeypatch
     assert agent.query_processor is FakeQueryProcessor.instances[0]
     assert orchestrator.kwargs["job_metadata_store"].__class__ is FakeRepo
     assert orchestrator.kwargs["report_metadata_store"].__class__ is FakeRepo
+    assert orchestrator.kwargs["transaction_manager"] is fake_session
+
+
+@pytest.mark.asyncio
+async def test_ensure_database_bootstrapped_only_initializes_once(monkeypatch):
+    events = []
+    fake_session_module = types.ModuleType("src.meridian.infrastructure.database.session")
+
+    async def fake_init_db():
+        events.append("init_db")
+
+    fake_session_module.init_db = fake_init_db
+    monkeypatch.setitem(sys.modules, "src.meridian.infrastructure.database.session", fake_session_module)
+    monkeypatch.setattr(tasks, "_database_bootstrapped", False)
+
+    await tasks.ensure_database_bootstrapped()
+    await tasks.ensure_database_bootstrapped()
+
+    assert events == ["init_db"]

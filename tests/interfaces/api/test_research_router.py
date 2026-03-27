@@ -224,3 +224,41 @@ async def test_get_research_report_preserves_zero_credibility_scores(client, mon
     assert response.status_code == 200
     payload = response.json()
     assert payload["evidence"][0]["credibility_score"] == 0.0
+
+
+@pytest.mark.asyncio
+async def test_create_research_commits_job_before_queue_dispatch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    db_path = tmp_path / "research-router-create.db"
+    engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}")
+    session_factory = async_sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    async def override_get_db():
+        async with session_factory() as session:
+            yield session
+
+    async def override_get_current_user():
+        return {"uid": "user-123", "email": "user@example.com"}
+
+    monkeypatch.setattr(research.run_research_pipeline, "delay", lambda _job_id: None)
+    app.dependency_overrides[research.get_db] = override_get_db
+    app.dependency_overrides[get_current_user] = override_get_current_user
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as async_client:
+        response = await async_client.post(
+            "/research/",
+            headers=auth_headers(),
+            json={"query": "fresh research"},
+        )
+
+    async with session_factory() as session:
+        stored_job = await session.get(DBResearchJob, response.json()["id"])
+
+    app.dependency_overrides.clear()
+    await engine.dispose()
+
+    assert response.status_code == 200
+    assert stored_job is not None
+    assert stored_job.query == "fresh research"

@@ -125,16 +125,18 @@ async def create_research(
 ):
     job_repo = SQLiteResearchJobRepository(db)
     job = ResearchJob(query=request.query, user_id=user["uid"])
-    
+
     await job_repo.save(job)
-    
+    await db.commit()
+
     try:
-         run_research_pipeline.delay(job.id)
+        run_research_pipeline.delay(job.id)
     except Exception as e:
-         logging.error(f"Failed to queue task: {e}")
-         job = job.fail(error_message=str(e))
-         await job_repo.save(job)
-         
+        logging.error(f"Failed to queue task: {e}")
+        job = job.fail(error_message=str(e))
+        await job_repo.save(job)
+        await db.commit()
+
     return ResearchResponse(id=job.id, status=job.status, query=job.query)
 
 @router.get("/", response_model=list[ResearchResponse])

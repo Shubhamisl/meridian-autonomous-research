@@ -88,6 +88,7 @@ async def test_init_db_adds_workspace_metadata_columns_and_repositories_use_them
             await job_repo.save_workspace_metadata(job.id, {"domain": "computer_science", "pipeline": {"current_phase": "research"}})
             await report_repo.save(report)
             await report_repo.save_workspace_metadata(report.id, {"format_label": "osint"})
+            await session.commit()
 
             reloaded_job = await job_repo.get(job.id)
             reloaded_report = await report_repo.get_by_job_id(job.id)
@@ -103,3 +104,60 @@ async def test_init_db_adds_workspace_metadata_columns_and_repositories_use_them
             assert await report_repo.get_workspace_metadata(report.id) == {"format_label": "osint"}
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_repository_save_requires_explicit_commit_for_cross_session_visibility(tmp_path: Path):
+    db_path = tmp_path / "repository-transactionality.db"
+    engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}")
+    session_factory = async_sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+    try:
+        await init_db(engine)
+        created_at = datetime(2024, 1, 1, 0, 0, 0)
+
+        async with session_factory() as writer_session:
+            job_repo = SQLiteResearchJobRepository(writer_session)
+            job = ResearchJob(
+                id="job-tx",
+                user_id="user-123",
+                query="transactionality check",
+                status="pending",
+                created_at=created_at,
+            )
+            await job_repo.save(job)
+
+            async with session_factory() as reader_session:
+                reader_repo = SQLiteResearchJobRepository(reader_session)
+                assert await reader_repo.get(job.id) is None
+
+            await writer_session.commit()
+
+        async with session_factory() as reader_session:
+            reader_repo = SQLiteResearchJobRepository(reader_session)
+            reloaded_job = await reader_repo.get("job-tx")
+
+        assert reloaded_job is not None
+        assert reloaded_job.query == "transactionality check"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_init_db_bootstrap_cache_is_per_engine_instance() -> None:
+    first_engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    second_engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+
+    try:
+        await init_db(first_engine)
+        await init_db(second_engine)
+
+        async with second_engine.connect() as conn:
+            result = await conn.execute(text("PRAGMA table_info(research_jobs)"))
+            columns = {row[1] for row in result.all()}
+
+        assert "id" in columns
+        assert "workspace_metadata" in columns
+    finally:
+        await first_engine.dispose()
+        await second_engine.dispose()
