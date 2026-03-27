@@ -2,7 +2,8 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import LoginPage from './pages/LoginPage';
-import MasonryDashboard from './pages/MasonryDashboard';
+import ResearchDashboardPage from './pages/ResearchDashboardPage';
+import ResearchWorkspacePage from './pages/ResearchWorkspacePage';
 
 export default function App() {
   return (
@@ -14,7 +15,15 @@ export default function App() {
             path="/dashboard"
             element={
               <ProtectedRoute>
-                <MasonryDashboard />
+                <ResearchDashboardPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/research/:jobId"
+            element={
+              <ProtectedRoute>
+                <ResearchWorkspacePage />
               </ProtectedRoute>
             }
           />
