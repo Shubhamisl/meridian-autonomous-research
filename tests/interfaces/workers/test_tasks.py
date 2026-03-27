@@ -49,6 +49,14 @@ class FakeChunkingService:
         self.__class__.instances.append(self)
 
 
+class FakeFormatSelector:
+    instances = []
+
+    def __init__(self, openrouter_client):
+        self.openrouter_client = openrouter_client
+        self.__class__.instances.append(self)
+
+
 class FakeRouter:
     def __init__(self):
         self.calls = []
@@ -110,17 +118,20 @@ class FakeOrchestrator:
 
 
 @pytest.mark.asyncio
-async def test_run_job_async_wires_phase_a_dependencies(monkeypatch):
+async def test_run_job_async_wires_phase_c_dependencies(monkeypatch):
     FakeOrchestrator.instances.clear()
     FakeResearchAgent.instances.clear()
     FakeCredibilityScorer.instances.clear()
     FakeChunkingService.instances.clear()
+    FakeFormatSelector.instances.clear()
     fake_session = FakeSession()
     fake_router = FakeRouter()
     fake_chunking_module = types.ModuleType("src.meridian.application.pipeline.chunking")
     fake_chunking_module.ChunkingService = FakeChunkingService
     fake_credibility_module = types.ModuleType("src.meridian.application.pipeline.credibility_scorer")
     fake_credibility_module.CredibilityScorer = FakeCredibilityScorer
+    fake_format_selector_module = types.ModuleType("src.meridian.application.pipeline.format_selector")
+    fake_format_selector_module.FormatSelector = FakeFormatSelector
     fake_chroma_module = types.ModuleType("src.meridian.infrastructure.vector_store.chroma_repository")
     fake_chroma_module.ChromaChunkRepository = FakeChunkRepo
     fake_wikipedia_module = types.ModuleType("src.meridian.infrastructure.external_apis.wikipedia_client")
@@ -145,6 +156,7 @@ async def test_run_job_async_wires_phase_a_dependencies(monkeypatch):
     monkeypatch.setattr("src.meridian.infrastructure.database.sqlite_repositories.SQLiteResearchReportRepository", FakeRepo)
     monkeypatch.setitem(sys.modules, "src.meridian.application.pipeline.chunking", fake_chunking_module)
     monkeypatch.setitem(sys.modules, "src.meridian.application.pipeline.credibility_scorer", fake_credibility_module)
+    monkeypatch.setitem(sys.modules, "src.meridian.application.pipeline.format_selector", fake_format_selector_module)
     monkeypatch.setitem(sys.modules, "src.meridian.infrastructure.vector_store.chroma_repository", fake_chroma_module)
     monkeypatch.setitem(sys.modules, "src.meridian.infrastructure.external_apis.wikipedia_client", fake_wikipedia_module)
     monkeypatch.setitem(sys.modules, "src.meridian.infrastructure.external_apis.arxiv_client", fake_arxiv_module)
@@ -169,6 +181,7 @@ async def test_run_job_async_wires_phase_a_dependencies(monkeypatch):
     agent = orchestrator.kwargs["agent"]
     chunking_service = orchestrator.kwargs["chunking_service"]
     credibility_scorer = chunking_service.credibility_scorer
+    format_selector = orchestrator.kwargs["format_selector"]
     assert agent.domain_classifier.openrouter_client.__class__ is FakeOpenRouterClient
     assert agent.source_router is fake_router
     assert agent.pubmed_client.__class__ is FakeSourceClient
@@ -178,6 +191,9 @@ async def test_run_job_async_wires_phase_a_dependencies(monkeypatch):
     assert orchestrator.kwargs["synthesizer"].openrouter_client.__class__ is FakeOpenRouterClient
     assert len(FakeCredibilityScorer.instances) == 1
     assert len(FakeChunkingService.instances) == 1
+    assert len(FakeFormatSelector.instances) == 1
     assert credibility_scorer is FakeCredibilityScorer.instances[0]
     assert chunking_service is FakeChunkingService.instances[0]
     assert credibility_scorer.openrouter_client.__class__ is FakeOpenRouterClient
+    assert format_selector is FakeFormatSelector.instances[0]
+    assert format_selector.openrouter_client.__class__ is FakeOpenRouterClient
