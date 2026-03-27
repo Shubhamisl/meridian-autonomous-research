@@ -30,6 +30,7 @@ def describe_firebase_setup() -> dict[str, object]:
         "adc_may_be_used": adc_may_be_used,
         "admin_initialization_succeeded": _firebase_admin_initialization_succeeded,
         "admin_credentials_available": _firebase_admin_initialization_succeeded,
+        "admin_initialization_error": _firebase_admin_initialization_error,
         "message": (
             "Firebase Admin is configured."
             if _firebase_admin_initialization_succeeded

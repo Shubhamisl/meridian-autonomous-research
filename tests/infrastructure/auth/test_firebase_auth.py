@@ -48,9 +48,17 @@ def test_firebase_setup_state_reports_sdk_init_and_credentials(monkeypatch):
 
     monkeypatch.setattr(firebase_auth, "firebase_admin", DummyFirebaseAdmin())
     monkeypatch.setattr(firebase_auth, "auth", object())
-    monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
+    monkeypatch.setattr(
+        firebase_auth, "_firebase_admin_service_account_path", None
+    )
+    monkeypatch.setattr(
+        firebase_auth, "_firebase_admin_service_account_available", False
+    )
     monkeypatch.setattr(
         firebase_auth, "_firebase_admin_initialization_succeeded", False
+    )
+    monkeypatch.setattr(
+        firebase_auth, "_firebase_admin_initialization_error", "Firebase Admin failed to initialize."
     )
     setup = firebase_auth.describe_firebase_setup()
     assert setup["auth_sdk_available"] is True
@@ -58,4 +66,5 @@ def test_firebase_setup_state_reports_sdk_init_and_credentials(monkeypatch):
     assert setup["adc_may_be_used"] is True
     assert setup["admin_initialization_succeeded"] is False
     assert setup["admin_credentials_available"] is False
+    assert setup["admin_initialization_error"] == "Firebase Admin failed to initialize."
     assert "GOOGLE_APPLICATION_CREDENTIALS" in setup["message"]
