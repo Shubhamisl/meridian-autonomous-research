@@ -8,7 +8,11 @@ import ReportHeader from '../components/detail/ReportHeader';
 import AppShell from '../components/layout/AppShell';
 import ReportViewer from '../components/ReportViewer';
 import { useAuth } from '../contexts/useAuth';
-import { fetchResearchReport, fetchResearchStatus, type ResearchReport } from '../lib/api';
+import {
+  fetchResearchReport,
+  fetchResearchStatus,
+  type ResearchWorkspacePayload,
+} from '../lib/api';
 
 interface WorkspaceState {
   query?: string;
@@ -21,10 +25,10 @@ export default function ResearchWorkspacePage() {
   const { getToken } = useAuth();
   const [jobQuery, setJobQuery] = useState<string | null>(initialQuery);
   const [status, setStatus] = useState('pending');
-  const [report, setReport] = useState<ResearchReport | null>(null);
+  const [workspace, setWorkspace] = useState<ResearchWorkspacePayload | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const query = report?.query ?? jobQuery ?? 'Research inquiry';
+  const query = workspace?.query ?? jobQuery ?? 'Research inquiry';
 
   const loadWorkspace = useCallback(async () => {
     try {
@@ -34,7 +38,9 @@ export default function ResearchWorkspacePage() {
 
       if (nextStatus.status === 'completed') {
         const nextReport = await fetchResearchReport(getToken, jobId);
-        setReport(nextReport);
+        setWorkspace(nextReport);
+      } else {
+        setWorkspace(null);
       }
 
       if (nextStatus.status === 'failed') {
@@ -64,13 +70,22 @@ export default function ResearchWorkspacePage() {
 
   return (
     <AppShell>
-      <ReportHeader jobId={jobId} query={query} status={status} />
-      <PipelineTimeline status={status} />
+      <ReportHeader
+        jobId={jobId}
+        query={query}
+        status={status}
+        domain={workspace?.domain}
+        formatLabel={workspace?.format_label}
+      />
+      <PipelineTimeline
+        phases={workspace?.pipeline?.phases ?? []}
+        currentPhase={workspace?.pipeline?.current_phase ?? null}
+      />
 
       <div className="grid gap-8 xl:grid-cols-[minmax(0,1fr)_340px]">
         <div className="space-y-8">
-          {report ? (
-            <ReportViewer report={report} />
+          {workspace ? (
+            <ReportViewer report={workspace} />
           ) : (
             <section className="rounded-[1.75rem] border border-fog/60 bg-paper p-10 shadow-soft">
               <div className="section-label">Executive Summary</div>
@@ -93,11 +108,15 @@ export default function ResearchWorkspacePage() {
               <p className="mt-3 text-sm leading-7">{loadError}</p>
             </section>
           ) : (
-            <EvidencePlaceholder />
+            <EvidencePlaceholder evidence={workspace?.evidence ?? []} />
           )}
         </div>
 
-        <ExplainabilityPanel status={status} />
+        <ExplainabilityPanel
+          status={status}
+          activeSources={workspace?.explainability.active_sources ?? []}
+          queryRefinements={workspace?.explainability.query_refinements ?? []}
+        />
       </div>
     </AppShell>
   );
