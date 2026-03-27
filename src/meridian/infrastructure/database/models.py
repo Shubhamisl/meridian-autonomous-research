@@ -14,6 +14,7 @@ class DBResearchJob(Base):
     created_at = Column(DateTime, nullable=False)
     completed_at = Column(DateTime, nullable=True)
     error_message = Column(Text, nullable=True)
+    workspace_metadata = Column(Text, nullable=True)
 
 class DBResearchReport(Base):
     __tablename__ = 'research_reports'
@@ -23,3 +24,4 @@ class DBResearchReport(Base):
     query = Column(String, nullable=False)
     markdown_content = Column(Text, nullable=False)
     created_at = Column(DateTime, nullable=False)
+    workspace_metadata = Column(Text, nullable=True)

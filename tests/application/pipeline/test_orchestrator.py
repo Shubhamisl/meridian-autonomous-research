@@ -16,6 +16,7 @@ class FakeJobRepo:
         return self.job
 
     async def save(self, job):
+        self.job = job
         self.saved_jobs.append(job)
 
 
@@ -43,6 +44,14 @@ class FakeAgent:
         self.documents = documents
         self.calls = []
         self.domain = "computer_science"
+        self.active_sources = ["arxiv", "ieee", "web"]
+        self.query_refinements = [
+            {
+                "source": "arxiv",
+                "raw_query": "threat actor report",
+                "enriched_query": "\"threat actor report\" after:2022-01-01",
+            }
+        ]
 
     async def run(self, topic, max_iterations=5):
         self.calls.append(topic)
@@ -225,3 +234,53 @@ async def test_run_pipeline_uses_general_when_agent_has_no_domain(monkeypatch):
     await orchestrator.run_pipeline(job.id)
 
     assert format_selector.calls == [("general", job.query)]
+
+
+@pytest.mark.asyncio
+async def test_run_pipeline_logs_and_persists_workspace_metadata(monkeypatch, caplog):
+    fake_research_agent_module = types.ModuleType("src.meridian.infrastructure.llm.research_agent")
+    fake_research_agent_module.ResearchAgent = object
+    fake_synthesizer_module = types.ModuleType("src.meridian.infrastructure.llm.synthesizer")
+    fake_synthesizer_module.ReportSynthesizer = object
+    monkeypatch.setitem(sys.modules, "src.meridian.infrastructure.llm.research_agent", fake_research_agent_module)
+    monkeypatch.setitem(sys.modules, "src.meridian.infrastructure.llm.synthesizer", fake_synthesizer_module)
+
+    orchestrator_module = importlib.import_module("src.meridian.application.pipeline.orchestrator")
+    PipelineOrchestrator = orchestrator_module.PipelineOrchestrator
+
+    job = ResearchJob(query="threat actor report")
+    document = Document(source="arxiv", url="https://example.com/paper", title="Threat Actor Report", content="content")
+    chunk = Chunk(
+        document_id=document.id,
+        content="service chunk",
+        metadata={
+            "source": "arxiv",
+            "title": "Threat Actor Report",
+            "url": "https://example.com/paper",
+        },
+        credibility_score=0.87,
+    )
+    job_repo = FakeJobRepo(job)
+    report_repo = FakeReportRepo()
+    chunk_repo = FakeChunkRepo()
+    agent = FakeAgent([document])
+    chunking_service = FakeChunkingService([chunk])
+    synthesizer = FakeSynthesizer()
+    format_selector = FakeFormatSelector("osint")
+
+    orchestrator = PipelineOrchestrator(
+        job_repo=job_repo,
+        report_repo=report_repo,
+        chunk_repo=chunk_repo,
+        agent=agent,
+        synthesizer=synthesizer,
+        chunking_service=chunking_service,
+        format_selector=format_selector,
+    )
+
+    with caplog.at_level("INFO"):
+        report = await orchestrator.run_pipeline(job.id)
+
+    assert report.metadata["domain"] == "computer_science"
+    assert report.metadata["format_label"] == "osint"
+    assert report.metadata["pipeline"]["current_phase"] == "synthesize"

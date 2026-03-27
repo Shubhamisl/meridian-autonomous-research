@@ -43,10 +43,29 @@ class ResearchAgent:
         self.semantic_scholar_client = semantic_scholar_client or SemanticScholarClient()
         self.query_processor = query_processor or QueryProcessor()
         self.domain = "general"
+        self.active_sources: list[str] = []
+        self.query_refinements: list[dict[str, str]] = []
 
     async def run(self, topic: str, max_iterations: int = 5) -> List[Document]:
+        def _source_label(tool_name: str) -> str:
+            mapping = {
+                "search_web": "web",
+                "search_arxiv": "arxiv",
+                "search_pubmed": "pubmed",
+                "search_ieee": "ieee",
+                "search_semantic_scholar": "semantic_scholar",
+                "search_wikipedia": "wikipedia",
+            }
+            return mapping.get(tool_name, tool_name.removeprefix("search_"))
+
         self.domain = await self.domain_classifier.classify(topic)
         tools = self.source_router.get_tools_for_domain(self.domain)
+        self.active_sources = [
+            _source_label(tool["function"]["name"])
+            for tool in tools
+            if tool["function"]["name"] != "finish_research"
+        ]
+        self.query_refinements = []
 
         messages = [
             {
@@ -80,17 +99,6 @@ class ResearchAgent:
                 getattr(result, "title", ""),
                 getattr(result, "content", getattr(result, "summary", getattr(result, "body", ""))),
             )
-
-        def _source_label(tool_name: str) -> str:
-            mapping = {
-                "search_web": "web",
-                "search_arxiv": "arxiv",
-                "search_pubmed": "pubmed",
-                "search_ieee": "ieee",
-                "search_semantic_scholar": "semantic_scholar",
-                "search_wikipedia": "wikipedia",
-            }
-            return mapping.get(tool_name, tool_name.removeprefix("search_"))
 
         async def _run_search(client, query: str):
             if client is None:
@@ -139,6 +147,13 @@ class ResearchAgent:
                     raw_query = args.get("query", topic)
                     source = _source_label(func_name)
                     enriched_query = self.query_processor.enrich(raw_query, self.domain, source)
+                    self.query_refinements.append(
+                        {
+                            "source": source,
+                            "raw_query": raw_query,
+                            "enriched_query": enriched_query,
+                        }
+                    )
                     logger.debug(
                         "Dispatching search for %s with raw query=%r enriched query=%r",
                         source,
