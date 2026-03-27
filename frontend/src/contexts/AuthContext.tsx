@@ -16,6 +16,14 @@ const AuthContext = createContext<AuthContextType | null>(null);
 const E2E_BYPASS_STORAGE_KEY = 'meridian:e2e-auth';
 const isE2ETestingEnabled = import.meta.env.VITE_E2E_TESTING === '1';
 
+function isLocalE2EHost() {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  return ['127.0.0.1', 'localhost'].includes(window.location.hostname);
+}
+
 function createE2ETestUser(): User {
   return {
     uid: 'e2e-user',
@@ -52,7 +60,7 @@ function createE2ETestUser(): User {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const bypassEnabled =
     isE2ETestingEnabled &&
-      typeof window !== 'undefined' &&
+      isLocalE2EHost() &&
       window.localStorage.getItem(E2E_BYPASS_STORAGE_KEY) === '1';
   const [user, setUser] = useState<User | null>(() => {
     return bypassEnabled ? createE2ETestUser() : null;
@@ -88,6 +96,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = async () => {
+    if (bypassEnabled) {
+      window.localStorage.removeItem(E2E_BYPASS_STORAGE_KEY);
+      setUser(null);
+      return;
+    }
+
     if (!auth) return;
     await signOut(auth);
   };
