@@ -1,0 +1,55 @@
+Design a premium desktop research workspace for Meridian, an autonomous research intelligence platform.
+
+Use the Meridian design system in ../DESIGN.md as the source of truth. This screen belongs to an authenticated React app and should represent a completed research job.
+
+Overall vibe:
+Editorial reading product, analyst workstation, trustworthy AI system, report-first experience.
+
+DESIGN SYSTEM (REQUIRED):
+- Platform: Web desktop
+- Palette: Deep Ink (#0F172A), Cloud Ivory (#F8FAFC), Paper Warmth (#F6F1E8), Signal Teal (#0F766E), Evidence Blue (#2563EB), Progress Amber (#D97706)
+- Typography: premium serif for report headings, clean grotesk sans for UI chrome and metadata
+- Style: layered side panels, soft dividers, long-form reading comfort, minimal but meaningful motion
+
+PAGE STRUCTURE:
+1. **Workspace Header**
+- research query title
+- job status
+- detected domain pill
+- selected format pill
+- timestamps / metadata
+
+2. **Executive Summary Module**
+- visually prominent summary or abstract card near the top
+- should feel like the key takeaway for leaders, without losing analyst credibility
+
+3. **Main Report Column**
+- long-form report body with excellent typography
+- section structure should feel polished and publication-grade
+- inline citation anchors should be present and elegant
+- support tables and highlighted findings
+
+4. **Explainability Side Panel**
+- detected domain
+- source routing summary
+- selected report format
+- credibility weighting summary
+- query refinement examples
+- should feel secondary but always accessible
+
+5. **Evidence Section**
+- source cards or evidence list
+- each item includes source name, title, snippet, credibility score, relevance signal, and open-original action
+- should be easy to scan and trust
+
+6. **Pipeline Timeline**
+- elegant representation of phases:
+  classify, collect, score, chunk, retrieve, synthesize
+- compact enough not to overpower the report
+
+7. **Reading Mode Control**
+- segmented control for Summary vs Deep Analysis
+- optional tabs or chips for Report, Sources, Explainability
+
+UX GOAL:
+The default experience should answer the user’s question immediately, while the surrounding UI makes it easy to inspect why Meridian reached that conclusion.
