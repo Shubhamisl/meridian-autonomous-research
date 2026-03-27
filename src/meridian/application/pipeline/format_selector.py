@@ -3,7 +3,7 @@ from src.meridian.infrastructure.llm.openrouter_client import OpenRouterClient
 
 class FormatSelector:
     ALLOWED_LABELS = {"imrad", "mece", "osint", "general"}
-    LABEL_ORDER = ("imrad", "mece", "osint", "general")
+    LABEL_ORDER = ("imrad", "osint", "mece", "general")
     DOMAIN_DEFAULTS = {
         "biomedical": "imrad",
         "computer_science": "general",
@@ -87,10 +87,10 @@ class FormatSelector:
         if len(matched_labels) == 1:
             return matched_labels[0], []
 
-        competing_candidates = [
-            label for label in self.LABEL_ORDER if label != default_label and label in matched_labels
-        ]
-        return default_label, competing_candidates
+        ranked_matches = [label for label in self.LABEL_ORDER if label in matched_labels]
+        rule_based_recommendation = ranked_matches[0]
+        competing_candidates = ranked_matches[1:]
+        return rule_based_recommendation, competing_candidates
 
     def _build_messages(
         self,

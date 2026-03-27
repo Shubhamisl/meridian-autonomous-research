@@ -64,10 +64,9 @@ async def test_mixed_mece_and_osint_signals_trigger_llm_tiebreaker():
     assert result == "mece"
     assert client.calls == 1
     assert client.last_messages is not None
-    assert "general" in client.last_messages[0]["content"].lower()
     assert "breach campaign" in client.last_messages[1]["content"].lower()
-    assert "rule-based recommendation" in client.last_messages[1]["content"].lower()
-    assert "competing candidates: mece, osint" in client.last_messages[1]["content"].lower()
+    assert "rule-based recommendation: osint" in client.last_messages[1]["content"].lower()
+    assert "competing candidates: mece" in client.last_messages[1]["content"].lower()
 
 
 @pytest.mark.asyncio
@@ -80,7 +79,7 @@ async def test_invalid_llm_label_falls_back_to_rule_result():
         "Analyze the breach campaign, market strategy, and revenue impact.",
     )
 
-    assert result == "general"
+    assert result == "osint"
     assert client.calls == 1
 
 
@@ -94,5 +93,5 @@ async def test_llm_exception_falls_back_to_rule_result():
         "Analyze the breach campaign, market strategy, and revenue impact.",
     )
 
-    assert result == "general"
+    assert result == "osint"
     assert client.calls == 1
