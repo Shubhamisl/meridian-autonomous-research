@@ -10,6 +10,8 @@ from src.meridian.infrastructure.auth.firebase_auth import get_current_user
 from src.meridian.interfaces.api.schemas.research_workspace import (
     EvidenceItem,
     ExplainabilityPayload,
+    PipelinePayload,
+    QueryRefinement,
     ResearchWorkspaceResponse,
 )
 from src.meridian.interfaces.workers.tasks import run_research_pipeline
@@ -37,15 +39,13 @@ class ResearchResponse(BaseModel):
     query: str | None = None
 
 
-async def _workspace_metadata(repository: object, entity_id: str | None) -> dict:
+async def _workspace_metadata(
+    repository: SQLiteResearchJobRepository | SQLiteResearchReportRepository,
+    entity_id: str | None,
+) -> dict:
     if not entity_id:
         return {}
-
-    getter = getattr(repository, "get_workspace_metadata", None)
-    if not callable(getter):
-        return {}
-
-    metadata = await getter(entity_id)
+    metadata = await repository.get_workspace_metadata(entity_id)
     return metadata if isinstance(metadata, dict) else {}
 
 
@@ -91,7 +91,7 @@ def build_explainability_payload(metadata: dict) -> ExplainabilityPayload:
     if not isinstance(query_refinements, list):
         query_refinements = []
 
-    normalized_refinements: list[dict[str, str]] = []
+    normalized_refinements: list[QueryRefinement] = []
     for item in query_refinements:
         if not isinstance(item, dict):
             continue
@@ -101,11 +101,11 @@ def build_explainability_payload(metadata: dict) -> ExplainabilityPayload:
         if not all(isinstance(value, str) and value for value in (source, raw_query, enriched_query)):
             continue
         normalized_refinements.append(
-            {
-                "source": source,
-                "raw_query": raw_query,
-                "enriched_query": enriched_query,
-            }
+            QueryRefinement(
+                source=source,
+                raw_query=raw_query,
+                enriched_query=enriched_query,
+            )
         )
 
     return ExplainabilityPayload(
@@ -210,7 +210,7 @@ async def get_research_report(
         markdown_content=report.markdown_content,
         domain=workspace_metadata.get("domain"),
         format_label=workspace_metadata.get("format_label"),
-        pipeline={"current_phase": current_phase, "phases": phases},
+        pipeline=PipelinePayload(current_phase=current_phase, phases=phases),
         evidence=build_evidence_items(evidence_chunks),
         explainability=build_explainability_payload(workspace_metadata),
     )

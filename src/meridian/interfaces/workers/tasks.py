@@ -9,7 +9,7 @@ async def _run_job_async(job_id: str):
     from src.meridian.application.pipeline.format_selector import FormatSelector
     from src.meridian.application.pipeline.query_processor import QueryProcessor
     from src.meridian.application.pipeline.source_router import SourceRouter
-    from src.meridian.infrastructure.database.session import SessionLocal
+    from src.meridian.infrastructure.database.session import SessionLocal, init_db
     from src.meridian.infrastructure.database.sqlite_repositories import (
         SQLiteResearchJobRepository,
         SQLiteResearchReportRepository,
@@ -24,6 +24,8 @@ async def _run_job_async(job_id: str):
     from src.meridian.infrastructure.llm.research_agent import ResearchAgent
     from src.meridian.infrastructure.llm.synthesizer import ReportSynthesizer
     from src.meridian.infrastructure.vector_store.chroma_repository import ChromaChunkRepository
+
+    await init_db()
 
     async with SessionLocal() as session:
         job_repo = SQLiteResearchJobRepository(session)
@@ -59,6 +61,8 @@ async def _run_job_async(job_id: str):
         orchestrator = PipelineOrchestrator(
             job_repo=job_repo,
             report_repo=report_repo,
+            job_metadata_store=job_repo,
+            report_metadata_store=report_repo,
             chunk_repo=chunk_repo,
             agent=agent,
             synthesizer=synthesizer,

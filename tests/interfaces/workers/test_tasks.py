@@ -8,7 +8,11 @@ from src.meridian.interfaces.workers import tasks
 
 
 class FakeSession:
+    def __init__(self, events=None):
+        self.events = events if events is not None else []
+
     async def __aenter__(self):
+        self.events.append("session_enter")
         return self
 
     async def __aexit__(self, exc_type, exc, tb):
@@ -18,6 +22,12 @@ class FakeSession:
 class FakeRepo:
     def __init__(self, session):
         self.session = session
+
+    async def get_workspace_metadata(self, entity_id):
+        return {}
+
+    async def save_workspace_metadata(self, entity_id, metadata):
+        return None
 
 
 class FakeChunkRepo:
@@ -127,17 +137,23 @@ class FakeOrchestrator:
 
 
 @pytest.mark.asyncio
-async def test_run_job_async_wires_phase_c_dependencies(monkeypatch):
+async def test_run_job_async_runs_init_db_before_wiring_dependencies(monkeypatch):
     FakeOrchestrator.instances.clear()
     FakeResearchAgent.instances.clear()
     FakeCredibilityScorer.instances.clear()
     FakeChunkingService.instances.clear()
     FakeFormatSelector.instances.clear()
     FakeQueryProcessor.instances.clear()
-    fake_session = FakeSession()
+    events = []
+    fake_session = FakeSession(events)
     fake_router = FakeRouter()
     fake_session_module = types.ModuleType("src.meridian.infrastructure.database.session")
     fake_session_module.SessionLocal = lambda: fake_session
+
+    async def fake_init_db():
+        events.append("init_db")
+
+    fake_session_module.init_db = fake_init_db
     fake_repositories_module = types.ModuleType("src.meridian.infrastructure.database.sqlite_repositories")
     fake_repositories_module.SQLiteResearchJobRepository = FakeRepo
     fake_repositories_module.SQLiteResearchReportRepository = FakeRepo
@@ -202,6 +218,7 @@ async def test_run_job_async_wires_phase_c_dependencies(monkeypatch):
 
     await tasks._run_job_async("job-123")
 
+    assert events[:2] == ["init_db", "session_enter"]
     orchestrator = FakeOrchestrator.instances[0]
     agent = orchestrator.kwargs["agent"]
     chunking_service = orchestrator.kwargs["chunking_service"]
@@ -224,3 +241,5 @@ async def test_run_job_async_wires_phase_c_dependencies(monkeypatch):
     assert format_selector is FakeFormatSelector.instances[0]
     assert format_selector.openrouter_client.__class__ is FakeOpenRouterClient
     assert agent.query_processor is FakeQueryProcessor.instances[0]
+    assert orchestrator.kwargs["job_metadata_store"].__class__ is FakeRepo
+    assert orchestrator.kwargs["report_metadata_store"].__class__ is FakeRepo

@@ -1,14 +1,22 @@
 import logging
-from typing import Any
+from typing import Any, Protocol
 
+from src.meridian.application.pipeline.chunking import ChunkingService
 from src.meridian.application.pipeline.format_selector import FormatSelector
-from src.meridian.domain.repositories import ResearchJobRepository, ResearchReportRepository, ChunkRepository
+from src.meridian.domain.repositories import ChunkRepository, ResearchJobRepository, ResearchReportRepository
 from src.meridian.infrastructure.llm.research_agent import ResearchAgent
 from src.meridian.infrastructure.llm.synthesizer import ReportSynthesizer
-from src.meridian.application.pipeline.chunking import ChunkingService
 
 logger = logging.getLogger(__name__)
 PIPELINE_PHASES = ["research", "chunk", "retrieve", "synthesize"]
+
+
+class WorkspaceMetadataStore(Protocol):
+    async def get_workspace_metadata(self, entity_id: str) -> dict[str, Any]:
+        ...
+
+    async def save_workspace_metadata(self, entity_id: str, metadata: dict[str, Any]) -> None:
+        ...
 
 
 def _update_pipeline_phase(metadata: dict[str, Any], phase: str) -> None:
@@ -57,25 +65,13 @@ def _derive_query_refinements(query: str, sources: list[str], recorded: Any) -> 
     return []
 
 
-async def _load_workspace_metadata(repository: object, entity_id: str) -> dict[str, Any]:
-    loader = getattr(repository, "get_workspace_metadata", None)
-    if not callable(loader):
-        return {}
-
-    metadata = await loader(entity_id)
-    return metadata if isinstance(metadata, dict) else {}
-
-
-async def _save_workspace_metadata(repository: object, entity_id: str, metadata: dict[str, Any]) -> None:
-    saver = getattr(repository, "save_workspace_metadata", None)
-    if callable(saver):
-        await saver(entity_id, dict(metadata))
-
 class PipelineOrchestrator:
     def __init__(
         self,
         job_repo: ResearchJobRepository,
         report_repo: ResearchReportRepository,
+        job_metadata_store: WorkspaceMetadataStore,
+        report_metadata_store: WorkspaceMetadataStore,
         chunk_repo: ChunkRepository,
         agent: ResearchAgent,
         synthesizer: ReportSynthesizer,
@@ -84,6 +80,8 @@ class PipelineOrchestrator:
     ):
         self.job_repo = job_repo
         self.report_repo = report_repo
+        self.job_metadata_store = job_metadata_store
+        self.report_metadata_store = report_metadata_store
         self.chunk_repo = chunk_repo
         self.agent = agent
         self.synthesizer = synthesizer
@@ -95,14 +93,13 @@ class PipelineOrchestrator:
         if not job:
             return
 
-        workspace_metadata = await _load_workspace_metadata(self.job_repo, job.id)
+        workspace_metadata = await self.job_metadata_store.get_workspace_metadata(job.id)
         try:
             _update_pipeline_phase(workspace_metadata, "research")
             job = job.start()
             await self.job_repo.save(job)
-            await _save_workspace_metadata(self.job_repo, job.id, workspace_metadata)
+            await self.job_metadata_store.save_workspace_metadata(job.id, workspace_metadata)
 
-            # Phase 1: Research Agent loop
             documents = await self.agent.run(topic=job.query)
             workspace_metadata["domain"] = getattr(self.agent, "domain", "general")
             active_sources = _unique_in_order(
@@ -116,7 +113,6 @@ class PipelineOrchestrator:
                 getattr(self.agent, "query_refinements", []),
             )
 
-            # Phase 2: Chunk & Embed
             _update_pipeline_phase(workspace_metadata, "chunk")
             all_chunks = await self.chunking_service.chunk_documents(documents)
             for document in documents:
@@ -132,10 +128,9 @@ class PipelineOrchestrator:
 
             await self.chunk_repo.save_all(job_id, all_chunks)
 
-            # Phase 3 & 4: RAG Retrieval and Synthesis
             _update_pipeline_phase(workspace_metadata, "retrieve")
             retrieved_chunks = await self.chunk_repo.search(job_id, query=job.query, top_k=10)
-            
+
             if not retrieved_chunks:
                 retrieved_chunks = all_chunks[:10]
 
@@ -152,14 +147,14 @@ class PipelineOrchestrator:
                 format_label=format_label,
             )
             await self.report_repo.save(report)
-            await _save_workspace_metadata(self.report_repo, report.id, workspace_metadata)
-            
+            await self.report_metadata_store.save_workspace_metadata(report.id, workspace_metadata)
+
             job = job.complete()
             await self.job_repo.save(job)
-            await _save_workspace_metadata(self.job_repo, job.id, workspace_metadata)
+            await self.job_metadata_store.save_workspace_metadata(job.id, workspace_metadata)
             return report
 
         except Exception as e:
             job = job.fail(error_message=str(e))
             await self.job_repo.save(job)
-            await _save_workspace_metadata(self.job_repo, job.id, workspace_metadata)
+            await self.job_metadata_store.save_workspace_metadata(job.id, workspace_metadata)
