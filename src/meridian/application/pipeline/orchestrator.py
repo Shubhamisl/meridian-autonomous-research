@@ -156,7 +156,7 @@ class PipelineOrchestrator:
             workspace_metadata["active_sources"] = active_sources
             domain = workspace_metadata["domain"]
             workspace_metadata["query_refinements"] = _derive_query_refinements(
-                job.query,
+                execution_query,
                 active_sources,
                 domain,
                 getattr(self.agent, "query_refinements", []),

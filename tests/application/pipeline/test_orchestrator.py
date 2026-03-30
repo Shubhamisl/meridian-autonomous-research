@@ -467,3 +467,60 @@ async def test_run_pipeline_records_failure_in_single_transaction(monkeypatch):
         "begin",
         ("end", None),
     ]
+
+
+@pytest.mark.asyncio
+async def test_run_pipeline_derives_query_refinements_from_execution_query_when_agent_records_none(monkeypatch):
+    fake_research_agent_module = types.ModuleType("src.meridian.infrastructure.llm.research_agent")
+    fake_research_agent_module.ResearchAgent = object
+    fake_synthesizer_module = types.ModuleType("src.meridian.infrastructure.llm.synthesizer")
+    fake_synthesizer_module.ReportSynthesizer = object
+    monkeypatch.setitem(sys.modules, "src.meridian.infrastructure.llm.research_agent", fake_research_agent_module)
+    monkeypatch.setitem(sys.modules, "src.meridian.infrastructure.llm.synthesizer", fake_synthesizer_module)
+
+    orchestrator_module = importlib.import_module("src.meridian.application.pipeline.orchestrator")
+    PipelineOrchestrator = orchestrator_module.PipelineOrchestrator
+
+    job = ResearchJob(query="threat actor report")
+    document = Document(source="web", url="https://example.com", title="Threat Actor Report", content="content")
+    chunk = Chunk(document_id=document.id, content="service chunk", credibility_score=0.87)
+    job_repo = FakeJobRepo(job)
+    report_repo = FakeReportRepo()
+    chunk_repo = FakeChunkRepo()
+    agent = FakeAgent([document])
+    agent.query_refinements = []
+    chunking_service = FakeChunkingService([chunk])
+    synthesizer = FakeSynthesizer()
+    format_selector = FakeFormatSelector("osint")
+    job_metadata_store = FakeWorkspaceMetadataStore()
+    report_metadata_store = FakeWorkspaceMetadataStore()
+    job_metadata_store.metadata_by_id[job.id] = {
+        "display_query": "threat actor report",
+        "execution_query": "threat actor report after:2022-01-01",
+    }
+
+    orchestrator = PipelineOrchestrator(
+        job_repo=job_repo,
+        report_repo=report_repo,
+        chunk_repo=chunk_repo,
+        agent=agent,
+        synthesizer=synthesizer,
+        chunking_service=chunking_service,
+        format_selector=format_selector,
+        job_metadata_store=job_metadata_store,
+        report_metadata_store=report_metadata_store,
+    )
+
+    report = await orchestrator.run_pipeline(job.id)
+
+    assert report.query == "threat actor report"
+    assert synthesizer.calls[0]["query"] == "threat actor report"
+    assert chunk_repo.saved_chunks == [chunk]
+    assert format_selector.calls == [("computer_science", "threat actor report after:2022-01-01")]
+    assert job_metadata_store.metadata_by_id[job.id]["query_refinements"] == [
+        {
+            "source": "web",
+            "raw_query": "threat actor report after:2022-01-01",
+            "enriched_query": "threat actor report after:2022-01-01 -site:reddit.com -site:quora.com",
+        }
+    ]

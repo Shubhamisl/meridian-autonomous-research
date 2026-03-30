@@ -108,6 +108,14 @@ def _finish_and_tool_call(tool_name: str, query: str = "cancer"):
     )
 
 
+def _search_and_finish_calls(*tool_specs: tuple[str, str]):
+    tool_calls = []
+    for index, (tool_name, query) in enumerate(tool_specs, start=1):
+        tool_calls.append(FakeToolCall(str(index), tool_name, json.dumps({"query": query})))
+    tool_calls.append(FakeToolCall(str(len(tool_calls) + 1), "finish_research", "{\"summary\": \"done\"}"))
+    return FakeResponse(tool_calls)
+
+
 @pytest.mark.asyncio
 async def test_research_agent_enriches_query_before_dispatching_search():
     tools = [{"type": "function", "function": {"name": "search_arxiv", "parameters": {"type": "object"}}}]
@@ -200,3 +208,58 @@ async def test_research_agent_normalizes_search_arxiv_to_source_label():
     await agent.run("cancer", max_iterations=1)
 
     assert query_processor.calls == [("cancer", "general", "arxiv")]
+
+
+@pytest.mark.asyncio
+async def test_research_agent_raises_when_max_iterations_exhaust_with_only_wikipedia_evidence():
+    tools = [
+        {"type": "function", "function": {"name": "search_wikipedia", "parameters": {"type": "object"}}},
+        {"type": "function", "function": {"name": "search_web", "parameters": {"type": "object"}}},
+        {"type": "function", "function": {"name": "finish_research", "parameters": {"type": "object"}}},
+    ]
+    classifier = FakeClassifier("general")
+    router = FakeRouter(tools)
+    llm = FakeLLM([_search_and_finish_calls(("search_wikipedia", "cancer"))])
+    wikipedia_client = FakeSourceClient(
+        Document(source="wikipedia", title="Cancer", content="Wikipedia summary", url="https://example.com/wiki")
+    )
+
+    agent = ResearchAgent(
+        llm,
+        domain_classifier=classifier,
+        source_router=router,
+        wikipedia_client=wikipedia_client,
+    )
+
+    with pytest.raises(RuntimeError, match="non-Wikipedia source"):
+        await agent.run("cancer", max_iterations=1)
+
+
+@pytest.mark.asyncio
+async def test_research_agent_raises_when_model_stops_after_blocked_wikipedia_only_finish():
+    tools = [
+        {"type": "function", "function": {"name": "search_wikipedia", "parameters": {"type": "object"}}},
+        {"type": "function", "function": {"name": "search_web", "parameters": {"type": "object"}}},
+        {"type": "function", "function": {"name": "finish_research", "parameters": {"type": "object"}}},
+    ]
+    classifier = FakeClassifier("general")
+    router = FakeRouter(tools)
+    llm = FakeLLM(
+        [
+            _search_and_finish_calls(("search_wikipedia", "cancer")),
+            FakeResponse([]),
+        ]
+    )
+    wikipedia_client = FakeSourceClient(
+        Document(source="wikipedia", title="Cancer", content="Wikipedia summary", url="https://example.com/wiki")
+    )
+
+    agent = ResearchAgent(
+        llm,
+        domain_classifier=classifier,
+        source_router=router,
+        wikipedia_client=wikipedia_client,
+    )
+
+    with pytest.raises(RuntimeError, match="non-Wikipedia source"):
+        await agent.run("cancer", max_iterations=2)

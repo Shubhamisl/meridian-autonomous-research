@@ -71,6 +71,11 @@ class ResearchAgent:
         ]
 
         documents: list[Document] = []
+        available_search_tools = [
+            tool["function"]["name"]
+            for tool in tools
+            if tool["function"]["name"] != "finish_research"
+        ]
 
         def _document_payload(result: Document) -> dict:
             if hasattr(result, "model_dump"):
@@ -123,16 +128,17 @@ class ResearchAgent:
 
         def _can_finish_research() -> bool:
             unique_sources = {document.source for document in documents if document.source}
-            available_search_tools = [
-                tool["function"]["name"]
-                for tool in tools
-                if tool["function"]["name"] != "finish_research"
-            ]
             if len(available_search_tools) < 2:
                 return True
             if len(unique_sources) < 2:
                 return False
             return unique_sources != {"wikipedia"}
+
+        def _has_wikipedia_only_evidence() -> bool:
+            if len(available_search_tools) < 2:
+                return False
+            unique_sources = {document.source for document in documents if document.source}
+            return unique_sources == {"wikipedia"}
 
         for _ in range(max_iterations):
             response = await self.llm.generate_response(messages=messages, tools=tools)
@@ -198,5 +204,11 @@ class ResearchAgent:
 
             if all_finished:
                 break
+
+        if _has_wikipedia_only_evidence():
+            raise RuntimeError(
+                "Research could not finish safely: gather at least one additional non-Wikipedia source "
+                "before completing."
+            )
 
         return documents
