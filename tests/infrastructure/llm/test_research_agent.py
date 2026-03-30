@@ -308,6 +308,32 @@ async def test_research_agent_raises_when_model_stops_after_blocked_single_sourc
 
 
 @pytest.mark.asyncio
+async def test_research_agent_allows_wikipedia_only_finish_when_multiple_sources_are_not_required():
+    tools = [
+        {"type": "function", "function": {"name": "search_wikipedia", "parameters": {"type": "object"}}},
+        {"type": "function", "function": {"name": "search_web", "parameters": {"type": "object"}}},
+        {"type": "function", "function": {"name": "finish_research", "parameters": {"type": "object"}}},
+    ]
+    classifier = FakeClassifier("general")
+    router = FakeRouter(tools)
+    llm = FakeLLM([_search_and_finish_calls(("search_wikipedia", "cancer"))])
+    wikipedia_client = FakeSourceClient(
+        Document(source="wikipedia", title="Cancer", content="Wikipedia summary", url="https://example.com/wiki")
+    )
+
+    agent = ResearchAgent(
+        llm,
+        domain_classifier=classifier,
+        source_router=router,
+        wikipedia_client=wikipedia_client,
+    )
+
+    documents = await agent.run("cancer", max_iterations=1, require_multiple_sources=False)
+
+    assert [document.source for document in documents] == ["wikipedia"]
+
+
+@pytest.mark.asyncio
 async def test_research_agent_recovers_after_blocked_finish_once_additional_evidence_is_gathered():
     tools = [
         {"type": "function", "function": {"name": "search_web", "parameters": {"type": "object"}}},

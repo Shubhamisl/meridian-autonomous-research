@@ -59,7 +59,7 @@ class ResearchAgent:
         multi_source_guidance = (
             "Gather evidence from at least two complementary sources before you call finish_research, "
             if require_multiple_sources
-            else "Gather complementary evidence when it strengthens confidence before you call finish_research, "
+            else "Gather complementary evidence when it strengthens confidence before you call finish_research, and you may conclude with a single source when evidence is limited, "
         )
 
         messages = [
@@ -139,13 +139,19 @@ class ResearchAgent:
 
         def _can_finish_research() -> bool:
             unique_sources = {document.source for document in documents if document.source}
+            if not unique_sources:
+                return False
             if len(available_search_tools) < 2:
                 return True
-            if require_multiple_sources and len(unique_sources) < 2:
+            if not require_multiple_sources:
+                return True
+            if len(unique_sources) < 2:
                 return False
             return unique_sources != {"wikipedia"}
 
         def _has_wikipedia_only_evidence() -> bool:
+            if not require_multiple_sources:
+                return False
             if len(available_search_tools) < 2:
                 return False
             unique_sources = {document.source for document in documents if document.source}
