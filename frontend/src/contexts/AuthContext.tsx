@@ -85,10 +85,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (bypassEnabled) return undefined;
 
-    if (!auth) {
-      setLoading(false);
-      return undefined;
-    }
+    if (!auth) return undefined;
 
     getRedirectResult(auth).catch((error) => {
       console.error('Firebase redirect auth failed', error);
