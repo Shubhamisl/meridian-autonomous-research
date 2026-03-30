@@ -26,7 +26,7 @@ except ImportError:
 
 router = APIRouter()
 SessionLocal = async_sessionmaker(bind=engine, autoflush=False, autocommit=False)
-PHASES = ["research", "chunk", "retrieve", "synthesize"]
+PHASES = ["research", "select", "chunk", "retrieve", "synthesize"]
 
 async def get_db():
     async with SessionLocal() as session:

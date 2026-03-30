@@ -269,6 +269,83 @@ async def test_get_research_report_preserves_zero_credibility_scores(client, mon
 
 
 @pytest.mark.asyncio
+async def test_get_research_report_recognizes_select_phase(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    db_path = tmp_path / "research-router-select-phase.db"
+    engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}")
+    session_factory = async_sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    async def override_get_db():
+        async with session_factory() as session:
+            yield session
+
+    async def override_get_current_user():
+        return {"uid": "user-123", "email": "user@example.com"}
+
+    monkeypatch.setattr(research, "ChromaChunkRepository", FakeChunkRepository, raising=False)
+    app.dependency_overrides[research.get_db] = override_get_db
+    app.dependency_overrides[get_current_user] = override_get_current_user
+
+    async with session_factory() as session:
+        session.add(
+            DBResearchJob(
+                id="job-select-phase",
+                user_id="user-123",
+                query="ai regulation",
+                status="running",
+                created_at=datetime(2024, 1, 1, 0, 0, 0),
+                completed_at=None,
+                error_message=None,
+                workspace_metadata=json.dumps(
+                    {
+                        "domain": "general",
+                        "display_query": "ai regulation",
+                        "execution_query": "ai regulation",
+                        "pipeline": {
+                            "current_phase": "select",
+                            "phases": ["research", "select", "chunk", "retrieve", "synthesize"],
+                        },
+                    }
+                ),
+            )
+        )
+        session.add(
+            DBResearchReport(
+                id="report-select-phase",
+                job_id="job-select-phase",
+                query="ai regulation",
+                markdown_content="# Interim",
+                created_at=datetime(2024, 1, 1, 0, 0, 0),
+                workspace_metadata=json.dumps(
+                    {
+                        "domain": "general",
+                        "display_query": "ai regulation",
+                        "execution_query": "ai regulation",
+                        "pipeline": {
+                            "current_phase": "select",
+                            "phases": ["research", "select", "chunk", "retrieve", "synthesize"],
+                        },
+                    }
+                ),
+            )
+        )
+        await session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as async_client:
+        response = await async_client.get("/research/job-select-phase/report", headers=auth_headers())
+
+    app.dependency_overrides.clear()
+    await engine.dispose()
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["pipeline"]["current_phase"] == "select"
+    assert payload["pipeline"]["phases"] == ["research", "select", "chunk", "retrieve", "synthesize"]
+
+
+@pytest.mark.asyncio
 async def test_get_research_status_rejects_non_owner(client):
     async def override_get_current_user():
         return {"uid": "user-456", "email": "other@example.com"}

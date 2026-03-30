@@ -90,6 +90,7 @@ def _normalize_advanced_options(options: Any) -> dict[str, Any]:
 
 def _selection_decision_payload(decision: Any) -> dict[str, Any]:
     return {
+        "document_id": getattr(decision.document, "id", None),
         "source": getattr(decision.document, "source", None),
         "title": getattr(decision.document, "title", None),
         "url": getattr(decision.document, "url", None),
@@ -101,6 +102,7 @@ def _selection_decision_payload(decision: Any) -> dict[str, Any]:
         "source_query": getattr(decision, "source_query", None),
         "llm_attempted": getattr(decision, "llm_attempted", False),
         "llm_success": getattr(decision, "llm_success", False),
+        "credibility_score": getattr(decision, "credibility_score", None),
     }
 
 
@@ -108,7 +110,10 @@ def _selection_metadata(selection_result: Any) -> dict[str, Any]:
     return {
         "query": getattr(selection_result, "query", None),
         "domain": getattr(selection_result, "domain", None),
-        "source_queries": dict(getattr(selection_result, "source_queries", {}) or {}),
+        "source_queries": {
+            source: list(queries)
+            for source, queries in (getattr(selection_result, "source_queries", {}) or {}).items()
+        },
         "accepted_count": len(getattr(selection_result, "accepted", []) or []),
         "rejected_count": len(getattr(selection_result, "rejected", []) or []),
         "llm_budget_limit": getattr(selection_result, "llm_budget_limit", None),
@@ -127,6 +132,8 @@ def _coverage_metadata(verdict: Any) -> dict[str, Any]:
         "accepted_count": getattr(verdict, "accepted_count", None),
         "distinct_sources": getattr(verdict, "distinct_sources", None),
         "average_relevance": getattr(verdict, "average_relevance", None),
+        "source_distribution": dict(getattr(verdict, "source_distribution", {}) or {}),
+        "query_family_distribution": dict(getattr(verdict, "query_family_distribution", {}) or {}),
         "required_documents": getattr(verdict, "required_documents", None),
         "required_sources": getattr(verdict, "required_sources", None),
         "required_average_relevance": getattr(verdict, "required_average_relevance", None),
@@ -134,11 +141,59 @@ def _coverage_metadata(verdict: Any) -> dict[str, Any]:
     }
 
 
-def _source_queries_from_refinements(query_refinements: Any) -> dict[str, str]:
-    mapping: dict[str, str] = {}
+def _source_queries_from_refinements(query_refinements: Any) -> dict[str, list[str]]:
+    mapping: dict[str, list[str]] = {}
     for item in _normalize_query_refinements(query_refinements):
-        mapping[item["source"]] = item["enriched_query"]
+        mapping.setdefault(item["source"], []).append(item["enriched_query"])
     return mapping
+
+
+def _source_distribution(decisions: list[Any]) -> dict[str, int]:
+    distribution: dict[str, int] = {}
+    for decision in decisions:
+        source = getattr(getattr(decision, "document", None), "source", None)
+        if not isinstance(source, str) or not source:
+            continue
+        distribution[source] = distribution.get(source, 0) + 1
+    return distribution
+
+
+def _query_family_distribution(decisions: list[Any]) -> dict[str, int]:
+    distribution: dict[str, int] = {}
+    for decision in decisions:
+        document = getattr(decision, "document", None)
+        source = getattr(document, "source", None)
+        source_query = getattr(decision, "source_query", None) or "unknown_query"
+        if not isinstance(source, str) or not source:
+            continue
+        key = f"{source}::{source_query}"
+        distribution[key] = distribution.get(key, 0) + 1
+    return distribution
+
+
+def _attach_selection_credibility_scores(metadata: dict[str, Any], chunks: list[Any]) -> None:
+    selection = metadata.get("selection")
+    if not isinstance(selection, dict):
+        return
+
+    credibility_by_document_id: dict[str, float] = {}
+    for chunk in chunks:
+        document_id = getattr(chunk, "document_id", None)
+        if not isinstance(document_id, str) or not document_id:
+            continue
+        if document_id not in credibility_by_document_id:
+            credibility_by_document_id[document_id] = float(getattr(chunk, "credibility_score", 0.5))
+
+    accepted = selection.get("accepted")
+    if not isinstance(accepted, list):
+        return
+
+    for item in accepted:
+        if not isinstance(item, dict):
+            continue
+        document_id = item.get("document_id")
+        if isinstance(document_id, str) and document_id in credibility_by_document_id:
+            item["credibility_score"] = credibility_by_document_id[document_id]
 
 
 def _derive_query_refinements(
@@ -263,11 +318,15 @@ class PipelineOrchestrator:
                 if accepted_count
                 else 0.0
             )
+            source_distribution = _source_distribution(selection_result.accepted)
+            query_family_distribution = _query_family_distribution(selection_result.accepted)
             coverage_verdict = self.coverage_gate.evaluate(
                 domain=domain,
                 accepted_count=accepted_count,
                 distinct_sources=distinct_sources,
                 average_relevance=average_relevance,
+                source_distribution=source_distribution,
+                query_family_distribution=query_family_distribution,
             )
             workspace_metadata["selection"] = _selection_metadata(selection_result)
             workspace_metadata["coverage"] = _coverage_metadata(coverage_verdict)
@@ -293,6 +352,7 @@ class PipelineOrchestrator:
                 )
 
             await self.chunk_repo.save_all(job_id, all_chunks)
+            _attach_selection_credibility_scores(workspace_metadata, all_chunks)
 
             _update_pipeline_phase(workspace_metadata, "retrieve")
             await self.job_metadata_store.save_workspace_metadata(job.id, workspace_metadata)

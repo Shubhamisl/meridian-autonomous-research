@@ -128,7 +128,10 @@ class FakeSelectionService:
                 "query": query,
                 "domain": domain,
                 "candidates": list(candidates),
-                "source_queries": dict(source_queries),
+                "source_queries": {
+                    source: list(queries)
+                    for source, queries in source_queries.items()
+                },
             }
         )
         if self.result is not None:
@@ -149,7 +152,10 @@ class FakeSelectionService:
         return EvidenceSelectionResult(
             query=query,
             domain=domain,
-            source_queries=dict(source_queries),
+            source_queries={
+                source: list(queries)
+                for source, queries in source_queries.items()
+            },
             accepted=accepted,
             rejected=[],
             llm_budget_limit=5,
@@ -167,19 +173,31 @@ class FakeCoverageGate:
             accepted_count=1,
             distinct_sources=1,
             average_relevance=0.9,
+            source_distribution={"web": 1},
+            query_family_distribution={"web::query": 1},
             required_documents=1,
             required_sources=1,
             required_average_relevance=0.0,
         )
         self.calls = []
 
-    def evaluate(self, domain, accepted_count, distinct_sources, average_relevance):
+    def evaluate(
+        self,
+        domain,
+        accepted_count,
+        distinct_sources,
+        average_relevance,
+        source_distribution=None,
+        query_family_distribution=None,
+    ):
         self.calls.append(
             {
                 "domain": domain,
                 "accepted_count": accepted_count,
                 "distinct_sources": distinct_sources,
                 "average_relevance": average_relevance,
+                "source_distribution": dict(source_distribution or {}),
+                "query_family_distribution": dict(query_family_distribution or {}),
             }
         )
         return self.verdict
@@ -722,7 +740,10 @@ async def test_run_pipeline_filters_evidence_before_chunking_and_persists_select
     selection_result = EvidenceSelectionResult(
         query=job.query,
         domain="general",
-        source_queries={"semantic_scholar": "AI regulation in EU", "arxiv": "AI regulation in EU"},
+        source_queries={
+            "semantic_scholar": ["AI regulation in EU"],
+            "arxiv": ["AI regulation in EU", "AI regulation in EU after:2022-01-01"],
+        },
         accepted=[accepted_decision],
         rejected=[rejected_decision],
         llm_budget_limit=5,
@@ -767,16 +788,20 @@ async def test_run_pipeline_filters_evidence_before_chunking_and_persists_select
         coverage_gate=FakeCoverageGate(),
     )
 
+    active_coverage_gate = orchestrator.coverage_gate
     await orchestrator.run_pipeline(job.id)
 
     assert chunking_service.calls == [[accepted]]
     assert job_metadata_store.metadata_by_id[job.id]["selection"]["accepted_count"] == 1
     assert job_metadata_store.metadata_by_id[job.id]["selection"]["rejected_count"] == 1
     assert job_metadata_store.metadata_by_id[job.id]["selection"]["source_queries"] == {
-        "semantic_scholar": "AI regulation in EU",
-        "arxiv": "AI regulation in EU",
+        "semantic_scholar": ["AI regulation in EU"],
+        "arxiv": ["AI regulation in EU", "AI regulation in EU after:2022-01-01"],
     }
+    assert job_metadata_store.metadata_by_id[job.id]["selection"]["accepted"][0]["credibility_score"] == 0.87
     assert job_metadata_store.metadata_by_id[job.id]["coverage"]["action"] == "synthesize"
+    assert active_coverage_gate.calls[0]["source_distribution"] == {"semantic_scholar": 1}
+    assert active_coverage_gate.calls[0]["query_family_distribution"] == {"semantic_scholar::AI regulation in EU": 1}
 
 
 @pytest.mark.asyncio
@@ -807,7 +832,7 @@ async def test_run_pipeline_fails_when_coverage_is_insufficient(monkeypatch):
     selection_result = EvidenceSelectionResult(
         query=job.query,
         domain="general",
-        source_queries={"semantic_scholar": "AI regulation in EU"},
+        source_queries={"semantic_scholar": ["AI regulation in EU"]},
         accepted=[accepted_decision],
         rejected=[],
         llm_budget_limit=5,
@@ -829,6 +854,8 @@ async def test_run_pipeline_fails_when_coverage_is_insufficient(monkeypatch):
             accepted_count=1,
             distinct_sources=1,
             average_relevance=0.91,
+            source_distribution={"semantic_scholar": 1},
+            query_family_distribution={"semantic_scholar::AI regulation in EU": 1},
             required_documents=2,
             required_sources=1,
             required_average_relevance=0.65,

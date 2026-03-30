@@ -24,7 +24,7 @@ class EvidenceDecision:
 class EvidenceSelectionResult:
     query: str
     domain: str
-    source_queries: dict[str, str]
+    source_queries: dict[str, list[str]]
     accepted: list[EvidenceDecision]
     rejected: list[EvidenceDecision]
     llm_budget_limit: int
@@ -46,12 +46,13 @@ class EvidenceSelectionService:
         query: str,
         domain: str,
         candidates: list[Document],
-        source_queries: dict[str, str],
+        source_queries: dict[str, str] | dict[str, list[str]],
     ) -> EvidenceSelectionResult:
         accepted: list[EvidenceDecision] = []
         rejected: list[EvidenceDecision] = []
         remaining_budget = self.policy.relevance.llm_budget
         used_budget = 0
+        normalized_source_queries = self._normalize_source_queries(source_queries)
 
         for group in self._deduplicate(candidates):
             representative = group[0]
@@ -63,7 +64,7 @@ class EvidenceSelectionService:
             decision = self._decision_from_assessment(
                 representative,
                 assessment,
-                source_query=self._source_query_for(representative, source_queries),
+                source_query=self._source_query_for(representative, normalized_source_queries),
             )
 
             if decision.reason == "accepted":
@@ -84,7 +85,7 @@ class EvidenceSelectionService:
                         scorer_reason=assessment.reason,
                         scorer_detail=assessment.detail,
                         adjudication_detail=assessment.detail,
-                        source_query=self._source_query_for(duplicate, source_queries),
+                        source_query=self._source_query_for(duplicate, normalized_source_queries),
                         llm_attempted=assessment.llm_attempted,
                         llm_success=assessment.llm_success,
                     )
@@ -93,7 +94,7 @@ class EvidenceSelectionService:
         return EvidenceSelectionResult(
             query=query,
             domain=domain,
-            source_queries=dict(source_queries),
+            source_queries=normalized_source_queries,
             accepted=accepted,
             rejected=rejected,
             llm_budget_limit=self.policy.relevance.llm_budget,
@@ -194,6 +195,31 @@ class EvidenceSelectionService:
     def _normalize(self, value: str) -> str:
         return " ".join(value.lower().split()) if isinstance(value, str) else ""
 
-    def _source_query_for(self, document: Document, source_queries: dict[str, str]) -> str | None:
+    def _source_query_for(self, document: Document, source_queries: dict[str, list[str]]) -> str | None:
         source = self._normalize(document.source)
-        return source_queries.get(source) or source_queries.get(document.source) or source_queries.get(document.source.lower())
+        queries = (
+            source_queries.get(source)
+            or source_queries.get(document.source)
+            or source_queries.get(document.source.lower())
+        )
+        if not queries:
+            return None
+        return queries[-1]
+
+    def _normalize_source_queries(
+        self,
+        source_queries: dict[str, str] | dict[str, list[str]],
+    ) -> dict[str, list[str]]:
+        normalized: dict[str, list[str]] = {}
+        for raw_source, raw_queries in source_queries.items():
+            source = self._normalize(raw_source)
+            if not source:
+                continue
+            if isinstance(raw_queries, str):
+                queries = [raw_queries]
+            else:
+                queries = [query for query in raw_queries if isinstance(query, str) and query]
+            if not queries:
+                continue
+            normalized[source] = queries
+        return normalized
