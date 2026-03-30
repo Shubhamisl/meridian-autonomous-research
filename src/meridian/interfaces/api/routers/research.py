@@ -10,11 +10,14 @@ from src.meridian.domain.entities import ResearchJob
 from src.meridian.infrastructure.database.sqlite_repositories import SQLiteResearchJobRepository, SQLiteResearchReportRepository
 from src.meridian.infrastructure.auth.firebase_auth import get_current_user
 from src.meridian.interfaces.api.schemas.research_workspace import (
+    CoveragePayload,
     EvidenceItem,
     ExplainabilityPayload,
     PipelinePayload,
     QueryRefinement,
     ResearchWorkspaceResponse,
+    SelectionDecisionPayload,
+    SelectionPayload,
 )
 from src.meridian.interfaces.workers.tasks import run_research_pipeline
 import logging
@@ -149,10 +152,128 @@ def build_explainability_payload(
             if isinstance(source, str) and source
         ]
 
+    selection = _build_selection_payload(metadata.get("selection"))
+    coverage = _build_coverage_payload(metadata.get("coverage"))
+
     return ExplainabilityPayload(
         active_sources=[source for source in active_sources if isinstance(source, str) and source],
         query_refinements=normalized_refinements,
+        selection=selection,
+        coverage=coverage,
     )
+
+
+def _build_selection_payload(selection: object) -> SelectionPayload | None:
+    if not isinstance(selection, dict):
+        return None
+
+    return SelectionPayload(
+        accepted_count=_as_int(selection.get("accepted_count"), 0),
+        rejected_count=_as_int(selection.get("rejected_count"), 0),
+        source_queries=_normalize_source_query_map(selection.get("source_queries")),
+        llm_budget_limit=_optional_int(selection.get("llm_budget_limit")),
+        llm_budget_used=_optional_int(selection.get("llm_budget_used")),
+        llm_budget_remaining=_optional_int(selection.get("llm_budget_remaining")),
+        accepted=_build_selection_decisions(selection.get("accepted")),
+        rejected=_build_selection_decisions(selection.get("rejected")),
+    )
+
+
+def _build_coverage_payload(coverage: object) -> CoveragePayload | None:
+    if not isinstance(coverage, dict):
+        return None
+
+    return CoveragePayload(
+        action=_optional_str(coverage.get("action")),
+        reason=_optional_str(coverage.get("reason")),
+        accepted_count=_optional_int(coverage.get("accepted_count")),
+        distinct_sources=_optional_int(coverage.get("distinct_sources")),
+        average_relevance=_optional_float(coverage.get("average_relevance")),
+        source_distribution=_normalize_int_map(coverage.get("source_distribution")),
+        query_family_distribution=_normalize_int_map(coverage.get("query_family_distribution")),
+        required_documents=_optional_int(coverage.get("required_documents")),
+        required_sources=_optional_int(coverage.get("required_sources")),
+        required_average_relevance=_optional_float(coverage.get("required_average_relevance")),
+        message=_optional_str(coverage.get("message")),
+    )
+
+
+def _build_selection_decisions(decisions: object) -> list[SelectionDecisionPayload]:
+    if not isinstance(decisions, list):
+        return []
+
+    normalized: list[SelectionDecisionPayload] = []
+    for item in decisions:
+        if not isinstance(item, dict):
+            continue
+        reason = item.get("reason")
+        relevance_score = item.get("relevance_score")
+        if not isinstance(reason, str) or not isinstance(relevance_score, (int, float)):
+            continue
+        normalized.append(
+            SelectionDecisionPayload(
+                document_id=_optional_str(item.get("document_id")),
+                source=_optional_str(item.get("source")),
+                title=_optional_str(item.get("title")),
+                url=_optional_str(item.get("url")),
+                reason=reason,
+                relevance_score=float(relevance_score),
+                scorer_reason=_optional_str(item.get("scorer_reason")),
+                scorer_detail=_optional_str(item.get("scorer_detail")),
+                adjudication_detail=_optional_str(item.get("adjudication_detail")),
+                source_query=_optional_str(item.get("source_query")),
+                credibility_score=_optional_float(item.get("credibility_score")),
+                llm_attempted=bool(item.get("llm_attempted", False)),
+                llm_success=bool(item.get("llm_success", False)),
+            )
+        )
+    return normalized
+
+
+def _normalize_source_query_map(raw_mapping: object) -> dict[str, list[str]]:
+    if not isinstance(raw_mapping, dict):
+        return {}
+    normalized: dict[str, list[str]] = {}
+    for source, queries in raw_mapping.items():
+        if not isinstance(source, str) or not source:
+            continue
+        if isinstance(queries, list):
+            valid_queries = [query for query in queries if isinstance(query, str) and query]
+        elif isinstance(queries, str):
+            valid_queries = [queries]
+        else:
+            continue
+        if valid_queries:
+            normalized[source] = valid_queries
+    return normalized
+
+
+def _normalize_int_map(raw_mapping: object) -> dict[str, int]:
+    if not isinstance(raw_mapping, dict):
+        return {}
+    normalized: dict[str, int] = {}
+    for key, value in raw_mapping.items():
+        if isinstance(key, str) and isinstance(value, int):
+            normalized[key] = value
+    return normalized
+
+
+def _as_int(value: object, default: int) -> int:
+    return value if isinstance(value, int) else default
+
+
+def _optional_int(value: object) -> int | None:
+    return value if isinstance(value, int) else None
+
+
+def _optional_float(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def _optional_str(value: object) -> str | None:
+    return value if isinstance(value, str) and value else None
 
 
 def _normalize_pipeline_phase(candidate: object) -> str | None:

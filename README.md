@@ -18,11 +18,13 @@ Meridian currently supports:
 
 - domain classification before research begins
 - source routing by domain
-- multi-tool research with query enrichment
+- multi-tool research with query enrichment and source-native query planning
+- evidence selection before chunking to reject off-topic documents
+- coverage-gated synthesis so weak evidence sets fail closed instead of producing low-signal reports
 - credibility scoring and weighted retrieval
 - format-aware synthesis
 - a dashboard plus workspace-style frontend
-- explainability metadata such as sources, refinements, and pipeline phase
+- explainability metadata such as sources, refinements, selection decisions, coverage verdicts, and pipeline phase
 
 Current research domains:
 
@@ -58,7 +60,12 @@ Celery task -> PipelineOrchestrator
     |      +--> DomainClassifier
     |      +--> SourceRouter
     |      +--> QueryProcessor
+    |      +--> SourceQueryPlanner
     |      +--> External source adapters
+    |
+    +--> EvidenceSelectionService
+    |      +--> RelevanceScorer
+    |      +--> CoverageGate
     |
     +--> ChunkingService
     |      +--> CredibilityScorer
@@ -228,14 +235,19 @@ Each job goes through these phases:
    - classify the query
    - select tools by domain
    - enrich search queries
+   - compile source-native queries
    - gather evidence through the research agent
-2. `chunk`
+2. `select`
+   - score topical relevance
+   - reject off-topic or duplicate evidence
+   - evaluate evidence coverage before synthesis is allowed
+3. `chunk`
    - split documents into chunks
    - score credibility
-3. `retrieve`
+4. `retrieve`
    - run Chroma similarity search
    - re-rank using credibility-aware weighting
-4. `synthesize`
+5. `synthesize`
    - select report format
    - generate the final report
 
