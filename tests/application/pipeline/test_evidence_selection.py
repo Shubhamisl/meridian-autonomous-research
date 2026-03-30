@@ -127,4 +127,4 @@ async def test_select_preserves_provenance_and_scorer_detail():
     assert decision.scorer_detail == "aligned with query terms"
     assert decision.source_query == "AI regulation in EU"
     assert decision.adjudication_detail == "aligned with query terms"
-    assert result.source_queries["semantic_scholar"] == "AI regulation in EU"
+    assert result.source_queries["semantic_scholar"] == ["AI regulation in EU"]
