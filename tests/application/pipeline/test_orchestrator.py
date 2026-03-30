@@ -62,10 +62,16 @@ class FakeAgent:
         self.domain = "computer_science"
         self.log = log
 
-    async def run(self, topic, max_iterations=5):
-        self.calls.append(topic)
+    async def run(self, topic, max_iterations=5, require_multiple_sources=True):
+        self.calls.append(
+            {
+                "topic": topic,
+                "max_iterations": max_iterations,
+                "require_multiple_sources": require_multiple_sources,
+            }
+        )
         if self.log is not None:
-            self.log.append(("agent_run", topic))
+            self.log.append(("agent_run", topic, require_multiple_sources))
         return self.documents
 
 
@@ -74,17 +80,18 @@ class FakeSynthesizer:
         self.calls = []
         self.log = log
 
-    async def synthesize(self, job_id, query, chunks, format_label):
+    async def synthesize(self, job_id, query, chunks, format_label, report_depth="standard"):
         self.calls.append(
             {
                 "job_id": job_id,
                 "query": query,
                 "chunks": chunks,
                 "format_label": format_label,
+                "report_depth": report_depth,
             }
         )
         if self.log is not None:
-            self.log.append(("synthesize", job_id, query, len(chunks)))
+            self.log.append(("synthesize", job_id, query, len(chunks), report_depth))
         return ResearchReport(job_id=job_id, query=query, markdown_content="report")
 
 
@@ -197,6 +204,7 @@ async def test_run_pipeline_uses_chunking_service_logs_document_summary_and_pass
     assert len(report_repo.saved_reports) == 1
     assert format_selector.calls == [("computer_science", job.query)]
     assert synthesizer.calls[0]["format_label"] == "osint"
+    assert synthesizer.calls[0]["report_depth"] == "standard"
     assert [
         record.message
         for record in caplog.records
@@ -372,9 +380,9 @@ async def test_run_pipeline_persists_workspace_metadata_via_explicit_stores(monk
         }
     ]
     assert log == [
-        ("agent_run", "threat actor report after:2022-01-01"),
+        ("agent_run", "threat actor report after:2022-01-01", True),
         ("chunk_search", job.id, "threat actor report after:2022-01-01", 10),
-        ("synthesize", job.id, "threat actor report", 1),
+        ("synthesize", job.id, "threat actor report", 1, "standard"),
     ]
     assert report_metadata_store.metadata_by_id[report.id]["domain"] == "computer_science"
     assert report_metadata_store.metadata_by_id[report.id]["format_label"] == "osint"
@@ -524,3 +532,62 @@ async def test_run_pipeline_derives_query_refinements_from_execution_query_when_
             "enriched_query": "threat actor report after:2022-01-01 -site:reddit.com -site:quora.com",
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_run_pipeline_passes_structured_advanced_options_to_agent_and_synthesizer(monkeypatch):
+    fake_research_agent_module = types.ModuleType("src.meridian.infrastructure.llm.research_agent")
+    fake_research_agent_module.ResearchAgent = object
+    fake_synthesizer_module = types.ModuleType("src.meridian.infrastructure.llm.synthesizer")
+    fake_synthesizer_module.ReportSynthesizer = object
+    monkeypatch.setitem(sys.modules, "src.meridian.infrastructure.llm.research_agent", fake_research_agent_module)
+    monkeypatch.setitem(sys.modules, "src.meridian.infrastructure.llm.synthesizer", fake_synthesizer_module)
+
+    orchestrator_module = importlib.import_module("src.meridian.application.pipeline.orchestrator")
+    PipelineOrchestrator = orchestrator_module.PipelineOrchestrator
+
+    job = ResearchJob(query="threat actor report")
+    document = Document(source="web", url="https://example.com", title="Threat Actor Report", content="content")
+    chunk = Chunk(document_id=document.id, content="service chunk", credibility_score=0.87)
+    job_repo = FakeJobRepo(job)
+    report_repo = FakeReportRepo()
+    chunk_repo = FakeChunkRepo()
+    agent = FakeAgent([document])
+    chunking_service = FakeChunkingService([chunk])
+    synthesizer = FakeSynthesizer()
+    format_selector = FakeFormatSelector("osint")
+    job_metadata_store = FakeWorkspaceMetadataStore()
+    report_metadata_store = FakeWorkspaceMetadataStore()
+    job_metadata_store.metadata_by_id[job.id] = {
+        "display_query": "threat actor report",
+        "execution_query": "threat actor report after:2022-01-01",
+        "advanced_options": {
+            "recentOnly": True,
+            "requireMultipleSources": False,
+            "reportDepth": "deep",
+        },
+    }
+
+    orchestrator = PipelineOrchestrator(
+        job_repo=job_repo,
+        report_repo=report_repo,
+        chunk_repo=chunk_repo,
+        agent=agent,
+        synthesizer=synthesizer,
+        chunking_service=chunking_service,
+        format_selector=format_selector,
+        job_metadata_store=job_metadata_store,
+        report_metadata_store=report_metadata_store,
+    )
+
+    await orchestrator.run_pipeline(job.id)
+
+    assert agent.calls == [
+        {
+            "topic": "threat actor report after:2022-01-01",
+            "max_iterations": 5,
+            "require_multiple_sources": False,
+        }
+    ]
+    assert synthesizer.calls[0]["query"] == "threat actor report"
+    assert synthesizer.calls[0]["report_depth"] == "deep"

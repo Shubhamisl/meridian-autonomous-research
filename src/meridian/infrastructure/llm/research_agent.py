@@ -46,11 +46,21 @@ class ResearchAgent:
         self.active_sources: list[str] = []
         self.query_refinements: list[dict[str, str]] = []
 
-    async def run(self, topic: str, max_iterations: int = 5) -> List[Document]:
+    async def run(
+        self,
+        topic: str,
+        max_iterations: int = 5,
+        require_multiple_sources: bool = True,
+    ) -> List[Document]:
         self.domain = await self.domain_classifier.classify(topic)
         tools = self.source_router.get_tools_for_domain(self.domain)
         self.active_sources = []
         self.query_refinements = []
+        multi_source_guidance = (
+            "Gather evidence from at least two complementary sources before you call finish_research, "
+            if require_multiple_sources
+            else "Gather complementary evidence when it strengthens confidence before you call finish_research, "
+        )
 
         messages = [
             {
@@ -59,8 +69,8 @@ class ResearchAgent:
                     "You are an autonomous research intelligence agent. Your job is to "
                     "iteratively search the available sources to gather sufficient "
                     "information to write a comprehensive report on the user's query. "
-                    "Whenever possible, gather evidence from at least two complementary "
-                    "sources before you call finish_research, and do not rely on only "
+                    f"{multi_source_guidance}"
+                    "Do not rely on only "
                     "Wikipedia when other sources are available. "
                     "When you have enough context, call finish_research. "
                     "Use search operators such as after:YYYY-MM-DD, intitle:, -site:, "
@@ -131,7 +141,7 @@ class ResearchAgent:
             unique_sources = {document.source for document in documents if document.source}
             if len(available_search_tools) < 2:
                 return True
-            if len(unique_sources) < 2:
+            if require_multiple_sources and len(unique_sources) < 2:
                 return False
             return unique_sources != {"wikipedia"}
 
@@ -162,6 +172,8 @@ class ResearchAgent:
                 break
 
             all_finished = False
+            tool_messages: dict[str, dict] = {}
+            finish_tool_calls = []
             for tool_call in response.tool_calls:
                 func_name = tool_call.function.name
                 try:
@@ -172,16 +184,9 @@ class ResearchAgent:
                 tool_result_content = ""
 
                 if func_name == "finish_research":
-                    if _can_finish_research():
-                        all_finished = True
-                        finish_research_blocked = False
-                        tool_result_content = "Research successfully concluded. Proceed to generation."
-                    else:
-                        finish_research_blocked = True
-                        tool_result_content = (
-                            "Research is not complete yet. Gather at least one additional "
-                            "non-Wikipedia source before finishing."
-                        )
+                    finish_tool_calls.append(tool_call)
+                    continue
+
                 else:
                     raw_query = args.get("query", topic)
                     source = _source_label(func_name)
@@ -208,14 +213,37 @@ class ResearchAgent:
                         source, url, title, content = _result_fields(r)
                         documents.append(Document(source=source or self.domain, url=url, title=title, content=content))
 
-                messages.append(
-                    {
+                tool_messages[tool_call.id] = {
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "name": func_name,
+                    "content": tool_result_content,
+                }
+
+            if finish_tool_calls:
+                if _can_finish_research():
+                    all_finished = True
+                    finish_research_blocked = False
+                    finish_result_content = "Research successfully concluded. Proceed to generation."
+                else:
+                    finish_research_blocked = True
+                    finish_result_content = (
+                        "Research is not complete yet. Gather at least one additional "
+                        "non-Wikipedia source before finishing."
+                    )
+
+                for tool_call in finish_tool_calls:
+                    tool_messages[tool_call.id] = {
                         "role": "tool",
                         "tool_call_id": tool_call.id,
-                        "name": func_name,
-                        "content": tool_result_content,
+                        "name": "finish_research",
+                        "content": finish_result_content,
                     }
-                )
+
+            for tool_call in response.tool_calls:
+                tool_message = tool_messages.get(tool_call.id)
+                if tool_message is not None:
+                    messages.append(tool_message)
 
             if all_finished:
                 break

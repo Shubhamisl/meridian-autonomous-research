@@ -94,3 +94,19 @@ async def test_synthesize_uses_mece_template():
     await synthesizer.synthesize("job-1", "topic", build_chunks(), format_label="mece")
 
     assert synthesizer.llm.last_messages[0]["content"] == MECE_PROMPT
+
+
+@pytest.mark.asyncio
+async def test_synthesize_adds_deep_report_depth_instruction():
+    synthesizer = build_synthesizer()
+
+    await synthesizer.synthesize(
+        "job-1",
+        "topic",
+        build_chunks(),
+        format_label="general",
+        report_depth="deep",
+    )
+
+    assert "deeper analysis" in synthesizer.llm.last_messages[1]["content"]
+    assert "supporting detail" in synthesizer.llm.last_messages[1]["content"]

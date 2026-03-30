@@ -90,15 +90,9 @@ export default function ResearchDashboardPage() {
       if (advancedOptions.recentOnly) {
         queryParts.push('Prioritize recent developments and recent evidence where possible.');
       }
-      if (advancedOptions.requireMultipleSources) {
-        queryParts.push('Use multiple complementary sources rather than relying on a single source.');
-      }
-      if (advancedOptions.reportDepth === 'deep') {
-        queryParts.push('Provide a deeper analysis with more supporting detail and tradeoffs.');
-      }
 
-      const finalQuery = queryParts.join(' ');
-      const created = await createResearchJob(getToken, query, finalQuery);
+      const executionQuery = queryParts.join(' ');
+      const created = await createResearchJob(getToken, query, executionQuery, advancedOptions);
       setLocalQueries((current) => ({ ...current, [created.id]: query }));
       setJobs((current) => [{ ...created, query }, ...current]);
       navigate(`/workspace/${created.id}`, { state: { query, activeMode } });

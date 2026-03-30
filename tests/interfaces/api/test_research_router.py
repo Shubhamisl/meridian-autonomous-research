@@ -321,6 +321,11 @@ async def test_create_research_commits_job_before_queue_dispatch(tmp_path: Path,
             json={
                 "query": "fresh research",
                 "execution_query": "fresh research after:2022-01-01",
+                "advanced_options": {
+                    "recentOnly": True,
+                    "requireMultipleSources": False,
+                    "reportDepth": "deep",
+                },
             },
         )
 
@@ -336,4 +341,9 @@ async def test_create_research_commits_job_before_queue_dispatch(tmp_path: Path,
     metadata = json.loads(stored_job.workspace_metadata)
     assert metadata["display_query"] == "fresh research"
     assert metadata["execution_query"] == "fresh research after:2022-01-01"
+    assert metadata["advanced_options"] == {
+        "recentOnly": True,
+        "requireMultipleSources": False,
+        "reportDepth": "deep",
+    }
     assert response.json()["query"] == "fresh research"

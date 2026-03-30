@@ -1,3 +1,5 @@
+from typing import Literal
+
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,6 +35,13 @@ async def get_db():
 class ResearchRequest(BaseModel):
     query: str
     execution_query: str | None = None
+    advanced_options: "AdvancedResearchOptionsRequest | None" = None
+
+
+class AdvancedResearchOptionsRequest(BaseModel):
+    recentOnly: bool = True
+    requireMultipleSources: bool = True
+    reportDepth: Literal["standard", "deep"] = "standard"
 
 class ResearchResponse(BaseModel):
     id: str
@@ -163,6 +172,11 @@ async def create_research(
     workspace_metadata = await job_repo.get_workspace_metadata(job.id)
     workspace_metadata["display_query"] = request.query
     workspace_metadata["execution_query"] = request.execution_query or request.query
+    workspace_metadata["advanced_options"] = (
+        request.advanced_options.model_dump()
+        if request.advanced_options is not None
+        else AdvancedResearchOptionsRequest().model_dump()
+    )
     await job_repo.save_workspace_metadata(job.id, workspace_metadata)
     await db.commit()
 

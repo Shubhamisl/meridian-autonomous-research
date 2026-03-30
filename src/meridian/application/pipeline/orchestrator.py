@@ -67,6 +67,24 @@ def _normalize_query_refinements(query_refinements: Any) -> list[dict[str, str]]
     return normalized
 
 
+def _normalize_advanced_options(options: Any) -> dict[str, Any]:
+    normalized = {
+        "recentOnly": True,
+        "requireMultipleSources": True,
+        "reportDepth": "standard",
+    }
+    if not isinstance(options, dict):
+        return normalized
+
+    if isinstance(options.get("recentOnly"), bool):
+        normalized["recentOnly"] = options["recentOnly"]
+    if isinstance(options.get("requireMultipleSources"), bool):
+        normalized["requireMultipleSources"] = options["requireMultipleSources"]
+    if options.get("reportDepth") in {"standard", "deep"}:
+        normalized["reportDepth"] = options["reportDepth"]
+    return normalized
+
+
 def _derive_query_refinements(
     query: str,
     sources: list[str],
@@ -138,6 +156,8 @@ class PipelineOrchestrator:
 
         workspace_metadata = await self.job_metadata_store.get_workspace_metadata(job.id)
         try:
+            advanced_options = _normalize_advanced_options(workspace_metadata.get("advanced_options"))
+            workspace_metadata["advanced_options"] = advanced_options
             _update_pipeline_phase(workspace_metadata, "research")
             job = job.start()
             await self.job_repo.save(job)
@@ -147,7 +167,10 @@ class PipelineOrchestrator:
             execution_query = workspace_metadata.get("execution_query")
             if not isinstance(execution_query, str) or not execution_query:
                 execution_query = job.query
-            documents = await self.agent.run(topic=execution_query)
+            documents = await self.agent.run(
+                topic=execution_query,
+                require_multiple_sources=advanced_options["requireMultipleSources"],
+            )
             workspace_metadata["domain"] = getattr(self.agent, "domain", "general")
             active_sources = _unique_in_order(
                 [document.source for document in documents]
@@ -200,6 +223,7 @@ class PipelineOrchestrator:
                 job.query,
                 retrieved_chunks,
                 format_label=format_label,
+                report_depth=advanced_options["reportDepth"],
             )
             async with self._transaction():
                 await self.report_repo.save(report)
