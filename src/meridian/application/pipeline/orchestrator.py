@@ -2,14 +2,17 @@ from contextlib import asynccontextmanager
 import logging
 from typing import Any, Protocol
 
+from src.meridian.application.pipeline.coverage_gate import CoverageGate, InsufficientRelevantEvidenceError
 from src.meridian.application.pipeline.chunking import ChunkingService
+from src.meridian.application.pipeline.evidence_selection import EvidenceSelectionService
 from src.meridian.application.pipeline.format_selector import FormatSelector
+from src.meridian.application.pipeline.reliability_policy import ReliabilityPolicy
 from src.meridian.domain.repositories import ChunkRepository, ResearchJobRepository, ResearchReportRepository
 from src.meridian.infrastructure.llm.research_agent import ResearchAgent
 from src.meridian.infrastructure.llm.synthesizer import ReportSynthesizer
 
 logger = logging.getLogger(__name__)
-PIPELINE_PHASES = ["research", "chunk", "retrieve", "synthesize"]
+PIPELINE_PHASES = ["research", "select", "chunk", "retrieve", "synthesize"]
 
 
 class WorkspaceMetadataStore(Protocol):
@@ -85,6 +88,59 @@ def _normalize_advanced_options(options: Any) -> dict[str, Any]:
     return normalized
 
 
+def _selection_decision_payload(decision: Any) -> dict[str, Any]:
+    return {
+        "source": getattr(decision.document, "source", None),
+        "title": getattr(decision.document, "title", None),
+        "url": getattr(decision.document, "url", None),
+        "reason": decision.reason,
+        "relevance_score": decision.relevance_score,
+        "scorer_reason": getattr(decision, "scorer_reason", None),
+        "scorer_detail": getattr(decision, "scorer_detail", None),
+        "adjudication_detail": getattr(decision, "adjudication_detail", None),
+        "source_query": getattr(decision, "source_query", None),
+        "llm_attempted": getattr(decision, "llm_attempted", False),
+        "llm_success": getattr(decision, "llm_success", False),
+    }
+
+
+def _selection_metadata(selection_result: Any) -> dict[str, Any]:
+    return {
+        "query": getattr(selection_result, "query", None),
+        "domain": getattr(selection_result, "domain", None),
+        "source_queries": dict(getattr(selection_result, "source_queries", {}) or {}),
+        "accepted_count": len(getattr(selection_result, "accepted", []) or []),
+        "rejected_count": len(getattr(selection_result, "rejected", []) or []),
+        "llm_budget_limit": getattr(selection_result, "llm_budget_limit", None),
+        "llm_budget_used": getattr(selection_result, "llm_budget_used", None),
+        "llm_budget_remaining": getattr(selection_result, "llm_budget_remaining", None),
+        "accepted": [_selection_decision_payload(decision) for decision in getattr(selection_result, "accepted", []) or []],
+        "rejected": [_selection_decision_payload(decision) for decision in getattr(selection_result, "rejected", []) or []],
+    }
+
+
+def _coverage_metadata(verdict: Any) -> dict[str, Any]:
+    return {
+        "domain": getattr(verdict, "domain", None),
+        "action": getattr(verdict, "action", None),
+        "reason": getattr(verdict, "reason", None),
+        "accepted_count": getattr(verdict, "accepted_count", None),
+        "distinct_sources": getattr(verdict, "distinct_sources", None),
+        "average_relevance": getattr(verdict, "average_relevance", None),
+        "required_documents": getattr(verdict, "required_documents", None),
+        "required_sources": getattr(verdict, "required_sources", None),
+        "required_average_relevance": getattr(verdict, "required_average_relevance", None),
+        "message": verdict.failure_message() if hasattr(verdict, "failure_message") and getattr(verdict, "action", "") != "synthesize" else "coverage_sufficient",
+    }
+
+
+def _source_queries_from_refinements(query_refinements: Any) -> dict[str, str]:
+    mapping: dict[str, str] = {}
+    for item in _normalize_query_refinements(query_refinements):
+        mapping[item["source"]] = item["enriched_query"]
+    return mapping
+
+
 def _derive_query_refinements(
     query: str,
     sources: list[str],
@@ -123,6 +179,9 @@ class PipelineOrchestrator:
         synthesizer: ReportSynthesizer,
         chunking_service: ChunkingService,
         format_selector: FormatSelector,
+        evidence_selection_service: EvidenceSelectionService | None = None,
+        coverage_gate: CoverageGate | None = None,
+        reliability_policy: ReliabilityPolicy | None = None,
         transaction_manager: TransactionManager | None = None,
     ):
         self.job_repo = job_repo
@@ -134,6 +193,9 @@ class PipelineOrchestrator:
         self.synthesizer = synthesizer
         self.chunking_service = chunking_service
         self.format_selector = format_selector
+        self.reliability_policy = reliability_policy or getattr(evidence_selection_service, "policy", None) or getattr(coverage_gate, "policy", None) or ReliabilityPolicy()
+        self.evidence_selection_service = evidence_selection_service or EvidenceSelectionService(policy=self.reliability_policy)
+        self.coverage_gate = coverage_gate or CoverageGate(self.reliability_policy)
         self.transaction_manager = transaction_manager
 
     async def _commit_pending(self) -> None:
@@ -185,11 +247,41 @@ class PipelineOrchestrator:
                 getattr(self.agent, "query_refinements", []),
             )
 
+            selection_source_queries = _source_queries_from_refinements(workspace_metadata["query_refinements"])
+            _update_pipeline_phase(workspace_metadata, "select")
+            selection_result = await self.evidence_selection_service.select(
+                query=job.query,
+                domain=domain,
+                candidates=documents,
+                source_queries=selection_source_queries,
+            )
+            selected_documents = [decision.document for decision in selection_result.accepted]
+            accepted_count = len(selection_result.accepted)
+            distinct_sources = len(_unique_in_order([document.source for document in selected_documents]))
+            average_relevance = (
+                sum(decision.relevance_score for decision in selection_result.accepted) / accepted_count
+                if accepted_count
+                else 0.0
+            )
+            coverage_verdict = self.coverage_gate.evaluate(
+                domain=domain,
+                accepted_count=accepted_count,
+                distinct_sources=distinct_sources,
+                average_relevance=average_relevance,
+            )
+            workspace_metadata["selection"] = _selection_metadata(selection_result)
+            workspace_metadata["coverage"] = _coverage_metadata(coverage_verdict)
+            await self.job_metadata_store.save_workspace_metadata(job.id, workspace_metadata)
+            await self._commit_pending()
+
+            if getattr(coverage_verdict, "action", "retry") != "synthesize":
+                raise InsufficientRelevantEvidenceError(coverage_verdict)
+
             _update_pipeline_phase(workspace_metadata, "chunk")
             await self.job_metadata_store.save_workspace_metadata(job.id, workspace_metadata)
             await self._commit_pending()
-            all_chunks = await self.chunking_service.chunk_documents(documents)
-            for document in documents:
+            all_chunks = await self.chunking_service.chunk_documents(selected_documents)
+            for document in selected_documents:
                 document_chunks = [chunk for chunk in all_chunks if chunk.document_id == document.id]
                 credibility_score = document_chunks[0].credibility_score if document_chunks else 0.5
 
