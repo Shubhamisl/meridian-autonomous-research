@@ -1,161 +1,310 @@
 # Meridian
 
-**Autonomous Research Intelligence Engine**
+Meridian is an autonomous research intelligence engine that turns a natural-language question into a structured report with source gathering, credibility-aware retrieval, and a guided workspace UI.
 
-Meridian accepts a natural-language research query, spins up an async pipeline
-that ingests from arXiv, NewsAPI, and Wikipedia, builds a vector knowledge base,
-runs an LLM agent loop to iteratively gather evidence, then synthesises a
-structured report with citations — all without human-in-the-loop.
+It is built as a local-first full-stack application:
 
----
+- `FastAPI` API for job creation and report retrieval
+- `Celery` worker for background research execution
+- `React + Vite` frontend workspace
+- `SQLite` for local job/report persistence
+- `ChromaDB` for vector retrieval
+- `OpenRouter` for classification, agentic research, credibility checks, and synthesis
+- `Firebase` for frontend sign-in and backend token verification
 
-## Architecture
+## What Meridian Does Today
 
-```
-POST /research  ─►  FastAPI  ─►  Background Task (or Celery)
-                                         │
-                          ┌──────────────▼──────────────┐
-                          │      PipelineOrchestrator    │
-                          │                              │
-                          │  1. ResearchAgent (Claude)   │
-                          │     ├─ search_arxiv          │
-                          │     ├─ search_news           │
-                          │     ├─ search_wikipedia      │
-                          │     └─ query_knowledge_base  │
-                          │                              │
-                          │  2. Chunk + embed docs       │
-                          │     └─ chromadb              │
-                          │                              │
-                          │  3. RAG retrieval            │
-                          │                              │
-                          │  4. ReportSynthesizer        │
-                          └──────────────────────────────┘
-                                         │
-                              ResearchReport (PostgreSQL)
-```
+Meridian currently supports:
 
-### Design principles
+- domain classification before research begins
+- source routing by domain
+- multi-tool research with query enrichment
+- credibility scoring and weighted retrieval
+- format-aware synthesis
+- a dashboard plus workspace-style frontend
+- explainability metadata such as sources, refinements, and pipeline phase
 
-- **Clean / Hexagonal architecture**: domain entities live in `domain/` with
-  zero infrastructure imports. Infrastructure adapters implement abstract
-  repository interfaces. FastAPI is one of many possible delivery mechanisms.
+Current research domains:
 
-- **Immutable domain objects**: all entities are frozen Pydantic models.
-  State transitions return new instances (`job.start()`, `job.fail(...)`).
+- `biomedical`
+- `computer_science`
+- `economics`
+- `legal`
+- `general`
 
-- **Async-first**: everything from HTTP clients to DB queries uses `async/await`.
-  Document embedding is fan-out with bounded concurrency via `asyncio.Semaphore`.
+Current source adapters:
 
-- **Agentic loop**: `ResearchAgent` runs until Claude calls `finish_research`,
-  not for a fixed number of steps. The agent decides when it has enough evidence.
+- Wikipedia
+- web search
+- arXiv
+- PubMed
+- IEEE Xplore
+- Semantic Scholar
 
----
+## Architecture At A Glance
 
-## Tech stack
+Meridian follows a Clean/Hexagonal structure:
 
-| Concern | Library |
-|---|---|
-| API framework | FastAPI + Pydantic v2 |
-| LLM | Anthropic Claude (tool-use API) |
-| Vector store | ChromaDB |
-| Relational DB | PostgreSQL via SQLAlchemy 2.0 (async) |
-| Task queue | Celery + Redis |
-| HTTP client | httpx (async) |
-| Containerisation | Docker + docker-compose |
-| Testing | pytest-asyncio, pytest-httpx |
-
----
-
-## Quick start
-
-```bash
-# 1. Clone and set up environment
-git clone https://github.com/yourname/meridian.git
-cd meridian
-cp .env.example .env
-# Edit .env — add ANTHROPIC_API_KEY and NEWS_API_KEY
-
-# 2. Start all services
-docker compose up --build
-
-# 3. Submit a research query
-curl -X POST http://localhost:8000/research \
-  -H "Content-Type: application/json" \
-  -d '{"query": "Recent advances in retrieval-augmented generation"}'
-# → {"id": "abc-123", "status": "pending", ...}
-
-# 4. Poll until completed
-curl http://localhost:8000/research/abc-123
-
-# 5. Retrieve the report
-curl http://localhost:8000/research/abc-123/report
+```text
+frontend (React/Vite)
+    |
+    v
+FastAPI API
+    |
+    v
+Celery task -> PipelineOrchestrator
+    |
+    +--> ResearchAgent
+    |      +--> DomainClassifier
+    |      +--> SourceRouter
+    |      +--> QueryProcessor
+    |      +--> External source adapters
+    |
+    +--> ChunkingService
+    |      +--> CredibilityScorer
+    |
+    +--> ChromaChunkRepository
+    |
+    +--> FormatSelector
+    |
+    +--> ReportSynthesizer
 ```
 
-Celery monitoring UI is available at http://localhost:5555.
+Code layout:
 
----
-
-## Project structure
-
-```
+```text
 src/meridian/
-├── domain/
-│   ├── entities.py          # ResearchJob, Document, Chunk, ResearchReport
-│   └── repositories.py      # Abstract repository interfaces (ports)
-│
-├── application/
-│   ├── pipeline/
-│   │   └── orchestrator.py  # 4-phase pipeline coordinator
-│   └── use_cases/
-│       └── create_research.py
-│
-├── infrastructure/
-│   ├── llm/
-│   │   ├── research_agent.py   # Claude tool-calling loop
-│   │   └── synthesizer.py      # Report synthesis LLM call
-│   ├── external_apis/
-│   │   ├── arxiv_client.py
-│   │   ├── news_client.py
-│   │   └── wikipedia_client.py
-│   ├── vector_store/
-│   │   └── chroma_repository.py
-│   └── database/
-│       ├── models.py            # SQLAlchemy ORM models
-│       └── postgres_repositories.py
-│
-└── interfaces/
-    ├── api/
-    │   ├── main.py              # FastAPI app factory
-    │   ├── dependencies.py      # DI wiring
-    │   └── routers/
-    │       └── research.py
-    └── workers/
-        ├── app.py               # Celery app
-        └── tasks.py             # research_pipeline task
+|- domain/                  # entities + repository protocols
+|- application/pipeline/    # orchestration and application services
+|- infrastructure/          # adapters: LLM, DB, vector store, external APIs
+`- interfaces/              # FastAPI + Celery wiring
+
+frontend/
+|- src/components/
+|- src/pages/
+`- src/lib/
 ```
 
----
+## Current Stack
 
-## Running tests
+| Concern | Current implementation |
+|---|---|
+| API | FastAPI |
+| Worker | Celery |
+| Frontend | React 19 + Vite |
+| LLM provider | OpenRouter |
+| Local relational persistence | SQLite |
+| Vector store | ChromaDB |
+| Auth | Firebase |
+| Background broker/backend | SQLite-backed Celery by default |
+
+Important notes:
+
+- The repository contains `Dockerfile` and `docker-compose.yml`, but the current recommended way to run Meridian is the local dev flow below.
+- The README reflects the app as it runs today, not an aspirational deployment target.
+
+## Local Development
+
+### 1. Prerequisites
+
+- Python 3.10+ or 3.11
+- Node.js 20+
+- npm
+- a Firebase project for frontend auth
+- an OpenRouter API key
+
+Optional:
+
+- IEEE API key for IEEE Xplore results
+
+### 2. Backend environment
+
+Copy `.env.example` to `.env` and fill in the values:
+
+```env
+OPENROUTER_API_KEY=your_openrouter_api_key_here
+GOOGLE_APPLICATION_CREDENTIALS=/absolute/path/to/firebase-service-account.json
+IEEE_API_KEY=your_ieee_api_key_here
+SIMILARITY_WEIGHT=0.7
+CREDIBILITY_WEIGHT=0.3
+WEB_CREDIBILITY_AUDIT_LIMIT=5
+```
+
+Notes:
+
+- `GOOGLE_APPLICATION_CREDENTIALS` should point to a Firebase Admin service-account JSON on your machine.
+- `IEEE_API_KEY` is optional. If omitted, IEEE search is skipped gracefully.
+
+### 3. Frontend environment
+
+Copy `frontend/.env.example` to `frontend/.env` and fill in your Firebase web config:
+
+```env
+VITE_FIREBASE_API_KEY=your_firebase_api_key
+VITE_FIREBASE_AUTH_DOMAIN=your_project.firebaseapp.com
+VITE_FIREBASE_PROJECT_ID=your_project_id
+VITE_FIREBASE_STORAGE_BUCKET=your_project.appspot.com
+VITE_FIREBASE_MESSAGING_SENDER_ID=your_sender_id
+VITE_FIREBASE_APP_ID=your_app_id
+```
+
+### 4. Install dependencies
+
+Backend:
 
 ```bash
-pip install -e ".[dev]"
-pytest tests/ -v --asyncio-mode=auto
+python -m venv venv
+venv\Scripts\activate
+pip install -r requirements.txt
 ```
 
-Key test patterns used:
-- Repository fakes (in-memory implementations) for fast unit tests
-- `pytest-httpx` to mock external API calls
-- Frozen-time fixtures for deterministic `created_at` fields
-- Integration tests spin up real containers via `pytest-docker`
+Frontend:
 
----
+```bash
+cd frontend
+npm install
+cd ..
+```
 
-## Extending Meridian
+### 5. Run Meridian
 
-| What | Where |
-|---|---|
-| Add a new data source | Implement the `ExternalAPIClient` protocol in `infrastructure/external_apis/` and add a new tool schema to `TOOLS` in `research_agent.py` |
-| Swap vector DB | Implement `ChunkRepository` ABC in `infrastructure/vector_store/` |
-| Add streaming report output | Add a `GET /research/{id}/stream` endpoint using FastAPI's `StreamingResponse` |
-| Add auth | Add an OAuth2 dependency to `interfaces/api/dependencies.py` |
+On Windows, the simplest option is:
+
+```bat
+run.bat
+```
+
+That starts:
+
+- Celery worker
+- FastAPI API on `http://127.0.0.1:8000`
+- Vite frontend on `http://localhost:5173`
+
+Manual startup is also fine.
+
+Backend API:
+
+```bash
+venv\Scripts\activate
+set PYTHONPATH=%cd%
+uvicorn src.meridian.interfaces.api.main:app --reload --port 8000
+```
+
+Worker:
+
+```bash
+venv\Scripts\activate
+set PYTHONPATH=%cd%
+celery -A src.meridian.interfaces.workers.app worker --loglevel=info -P solo
+```
+
+Frontend:
+
+```bash
+cd frontend
+npm run dev
+```
+
+## Using The App
+
+1. Open the frontend in your browser.
+2. Sign in with Firebase-backed Google auth.
+3. Create a research job from the dashboard.
+4. Follow the job in the workspace until the report completes.
+
+Core API endpoints:
+
+- `GET /health`
+- `POST /research/`
+- `GET /research/`
+- `GET /research/{job_id}`
+- `GET /research/{job_id}/report`
+
+## How Research Runs
+
+Each job goes through these phases:
+
+1. `research`
+   - classify the query
+   - select tools by domain
+   - enrich search queries
+   - gather evidence through the research agent
+2. `chunk`
+   - split documents into chunks
+   - score credibility
+3. `retrieve`
+   - run Chroma similarity search
+   - re-rank using credibility-aware weighting
+4. `synthesize`
+   - select report format
+   - generate the final report
+
+The frontend workspace surfaces:
+
+- report status
+- pipeline phase
+- domain and format
+- evidence cards
+- active sources
+- query refinements
+
+## Testing
+
+Backend:
+
+```bash
+set PYTHONPATH=%cd%
+python -m pytest tests -q
+```
+
+Frontend:
+
+```bash
+cd frontend
+npm test
+npm run lint
+npm run build
+```
+
+There are also Playwright-based browser tests in the frontend project.
+
+## Local Data And Runtime Artifacts
+
+Meridian creates local runtime state in the repo root by default:
+
+- `meridian.db`
+- `celery_broker.db`
+- `celery_results.db`
+- `chroma_db/`
+
+These are ignored by git and should not be committed.
+
+## Known Constraints
+
+- The current default deployment posture is local-first, not production-hardened cloud hosting.
+- Free OpenRouter models may rate-limit or change availability.
+- Some legal or thin-source queries may still depend heavily on web and Wikipedia coverage.
+- The repo still has a few non-blocking Pydantic deprecation warnings around `copy()`.
+- Frontend build currently warns about a large JS bundle.
+
+## Security Notes
+
+- Never commit `.env`, `frontend/.env`, Firebase Admin JSON files, or local database files.
+- Keep `GOOGLE_APPLICATION_CREDENTIALS` pointing to a local file path outside version control.
+- Review git status before pushing if you generate local debug artifacts or screenshots.
+
+## Repository Status
+
+This repository reflects the current working Meridian stack, including:
+
+- multi-phase research pipeline upgrades
+- redesigned frontend workspace
+- structured advanced research options
+- truth-preserving display query vs execution query handling
+
+If you are evaluating the project on GitHub, the best way to assess it is:
+
+1. read this README
+2. review the pipeline modules under `src/meridian/application/pipeline`
+3. run the frontend and backend locally
+4. submit a research query through the UI
