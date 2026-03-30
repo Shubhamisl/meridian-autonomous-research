@@ -87,7 +87,7 @@ def build_evidence_items(chunks: list) -> list[EvidenceItem]:
     return evidence_items
 
 
-def build_explainability_payload(metadata: dict) -> ExplainabilityPayload:
+def build_explainability_payload(metadata: dict, *, query: str, domain: str | None) -> ExplainabilityPayload:
     active_sources = metadata.get("active_sources", [])
     if not isinstance(active_sources, list):
         active_sources = []
@@ -112,6 +112,20 @@ def build_explainability_payload(metadata: dict) -> ExplainabilityPayload:
                 enriched_query=enriched_query,
             )
         )
+
+    if not normalized_refinements and active_sources:
+        from src.meridian.application.pipeline.query_processor import QueryProcessor
+
+        processor = QueryProcessor()
+        normalized_refinements = [
+            QueryRefinement(
+                source=source,
+                raw_query=query,
+                enriched_query=processor.enrich(query, domain or "general", source),
+            )
+            for source in active_sources
+            if isinstance(source, str) and source
+        ]
 
     return ExplainabilityPayload(
         active_sources=[source for source in active_sources if isinstance(source, str) and source],
@@ -221,5 +235,9 @@ async def get_research_report(
         format_label=workspace_metadata.get("format_label"),
         pipeline=PipelinePayload(current_phase=current_phase, phases=phases),
         evidence=build_evidence_items(evidence_chunks),
-        explainability=build_explainability_payload(workspace_metadata),
+        explainability=build_explainability_payload(
+            workspace_metadata,
+            query=report.query,
+            domain=workspace_metadata.get("domain"),
+        ),
     )

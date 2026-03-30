@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 
 import RecentResearchList from '../components/dashboard/RecentResearchList';
-import ResearchComposer from '../components/dashboard/ResearchComposer';
+import ResearchComposer, {
+  type AdvancedResearchOptions,
+} from '../components/dashboard/ResearchComposer';
 import StarterModes from '../components/dashboard/StarterModes';
 import AppShell from '../components/layout/AppShell';
 import { useAuth } from '../contexts/useAuth';
@@ -11,11 +13,20 @@ import {
   fetchResearchJobs,
   type ResearchJobSummary,
 } from '../lib/api';
+import { type ResearchMode } from '../lib/research-modes';
 
 export default function ResearchDashboardPage() {
   const navigate = useNavigate();
+  const { state } = useLocation() as { state: { prefillQuery?: string; prefillMode?: ResearchMode } | null };
   const { getToken } = useAuth();
   const [query, setQuery] = useState('');
+  const [activeMode, setActiveMode] = useState<ResearchMode>('General');
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [advancedOptions, setAdvancedOptions] = useState<AdvancedResearchOptions>({
+    recentOnly: true,
+    requireMultipleSources: true,
+    reportDepth: 'standard',
+  });
   const [jobs, setJobs] = useState<ResearchJobSummary[]>([]);
   const [localQueries, setLocalQueries] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
@@ -28,6 +39,15 @@ export default function ResearchDashboardPage() {
       // Keep the dashboard calm if polling fails; the workspace still handles direct job routes.
     }
   }, [getToken]);
+
+  useEffect(() => {
+    if (state?.prefillQuery !== undefined) {
+      setQuery(state.prefillQuery);
+    }
+    if (state?.prefillMode) {
+      setActiveMode(state.prefillMode);
+    }
+  }, [state?.prefillMode, state?.prefillQuery]);
 
   useEffect(() => {
     void loadJobs();
@@ -53,26 +73,54 @@ export default function ResearchDashboardPage() {
     setLoading(true);
 
     try {
-      const created = await createResearchJob(getToken, query);
+      const queryParts = [query.trim()];
+      if (activeMode !== 'General') {
+        queryParts.push(`Treat this as a ${activeMode.toLowerCase()} research request.`);
+      }
+      if (advancedOptions.recentOnly) {
+        queryParts.push('Prioritize recent developments and recent evidence where possible.');
+      }
+      if (advancedOptions.requireMultipleSources) {
+        queryParts.push('Use multiple complementary sources rather than relying on a single source.');
+      }
+      if (advancedOptions.reportDepth === 'deep') {
+        queryParts.push('Provide a deeper analysis with more supporting detail and tradeoffs.');
+      }
+
+      const finalQuery = queryParts.join(' ');
+      const created = await createResearchJob(getToken, finalQuery);
       setLocalQueries((current) => ({ ...current, [created.id]: query }));
       setJobs((current) => [{ ...created, query }, ...current]);
-      navigate(`/workspace/${created.id}`, { state: { query } });
+      navigate(`/workspace/${created.id}`, { state: { query, activeMode } });
       setQuery('');
     } finally {
       setLoading(false);
     }
-  }, [getToken, navigate, query]);
+  }, [activeMode, advancedOptions, getToken, navigate, query]);
+
+  const handleModeSelect = useCallback((mode: ResearchMode) => {
+    setActiveMode(mode);
+  }, []);
 
   return (
-    <AppShell>
+    <AppShell activeMode={activeMode} onSelectMode={handleModeSelect}>
       <ResearchComposer
+        activeMode={activeMode}
+        advancedOpen={advancedOpen}
         loading={loading}
+        onOptionsChange={setAdvancedOptions}
         query={query}
+        options={advancedOptions}
         onQueryChange={setQuery}
         onSubmit={handleSubmit}
+        onToggleAdvanced={() => setAdvancedOpen((current) => !current)}
       />
 
-      <StarterModes onSelectPrompt={setQuery} />
+      <StarterModes
+        onSelectPrompt={(value) => {
+          setQuery(value);
+        }}
+      />
 
       <section className="mb-16 rounded-[1.75rem] bg-slate px-8 py-7 text-white shadow-panel">
         <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">

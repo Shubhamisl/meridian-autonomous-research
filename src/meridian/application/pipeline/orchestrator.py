@@ -67,11 +67,30 @@ def _normalize_query_refinements(query_refinements: Any) -> list[dict[str, str]]
     return normalized
 
 
-def _derive_query_refinements(query: str, sources: list[str], recorded: Any) -> list[dict[str, str]]:
+def _derive_query_refinements(
+    query: str,
+    sources: list[str],
+    domain: str,
+    recorded: Any,
+) -> list[dict[str, str]]:
     normalized = _normalize_query_refinements(recorded)
     if normalized:
         return normalized
-    return []
+
+    from src.meridian.application.pipeline.query_processor import QueryProcessor
+
+    processor = QueryProcessor()
+    derived: list[dict[str, str]] = []
+    for source in _unique_in_order(sources):
+        enriched_query = processor.enrich(query, domain, source)
+        derived.append(
+            {
+                "source": source,
+                "raw_query": query,
+                "enriched_query": enriched_query,
+            }
+        )
+    return derived
 
 
 class PipelineOrchestrator:
@@ -132,9 +151,11 @@ class PipelineOrchestrator:
                 or list(getattr(self.agent, "active_sources", []))
             )
             workspace_metadata["active_sources"] = active_sources
+            domain = workspace_metadata["domain"]
             workspace_metadata["query_refinements"] = _derive_query_refinements(
                 job.query,
                 active_sources,
+                domain,
                 getattr(self.agent, "query_refinements", []),
             )
 

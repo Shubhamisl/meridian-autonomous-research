@@ -135,7 +135,23 @@ async def test_get_research_report_returns_workspace_metadata(client):
     assert payload["pipeline"]["current_phase"] == "synthesize"
     assert payload["evidence"][0]["source"] == "arxiv"
     assert payload["explainability"]["active_sources"] == ["arxiv", "ieee", "web"]
-    assert payload["explainability"]["query_refinements"] == []
+    assert payload["explainability"]["query_refinements"] == [
+        {
+            "source": "arxiv",
+            "raw_query": "threat actor report",
+            "enriched_query": '"threat actor report" after:2022-01-01',
+        },
+        {
+            "source": "ieee",
+            "raw_query": "threat actor report",
+            "enriched_query": "threat actor report after:2022-01-01",
+        },
+        {
+            "source": "web",
+            "raw_query": "threat actor report",
+            "enriched_query": "threat actor report after:2022-01-01 -site:reddit.com -site:quora.com",
+        },
+    ]
 
 
 @pytest.mark.asyncio

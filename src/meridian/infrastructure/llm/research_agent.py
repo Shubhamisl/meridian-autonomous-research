@@ -43,10 +43,14 @@ class ResearchAgent:
         self.semantic_scholar_client = semantic_scholar_client or SemanticScholarClient()
         self.query_processor = query_processor or QueryProcessor()
         self.domain = "general"
+        self.active_sources: list[str] = []
+        self.query_refinements: list[dict[str, str]] = []
 
     async def run(self, topic: str, max_iterations: int = 5) -> List[Document]:
         self.domain = await self.domain_classifier.classify(topic)
         tools = self.source_router.get_tools_for_domain(self.domain)
+        self.active_sources = []
+        self.query_refinements = []
 
         messages = [
             {
@@ -55,6 +59,9 @@ class ResearchAgent:
                     "You are an autonomous research intelligence agent. Your job is to "
                     "iteratively search the available sources to gather sufficient "
                     "information to write a comprehensive report on the user's query. "
+                    "Whenever possible, gather evidence from at least two complementary "
+                    "sources before you call finish_research, and do not rely on only "
+                    "Wikipedia when other sources are available. "
                     "When you have enough context, call finish_research. "
                     "Use search operators such as after:YYYY-MM-DD, intitle:, -site:, "
                     "quoted phrases, and combining operators when they improve recall."
@@ -114,6 +121,19 @@ class ResearchAgent:
                 case _:
                     return []
 
+        def _can_finish_research() -> bool:
+            unique_sources = {document.source for document in documents if document.source}
+            available_search_tools = [
+                tool["function"]["name"]
+                for tool in tools
+                if tool["function"]["name"] != "finish_research"
+            ]
+            if len(available_search_tools) < 2:
+                return True
+            if len(unique_sources) < 2:
+                return False
+            return unique_sources != {"wikipedia"}
+
         for _ in range(max_iterations):
             response = await self.llm.generate_response(messages=messages, tools=tools)
             response_message = response.model_dump(exclude_unset=True)
@@ -133,8 +153,14 @@ class ResearchAgent:
                 tool_result_content = ""
 
                 if func_name == "finish_research":
-                    all_finished = True
-                    tool_result_content = "Research successfully concluded. Proceed to generation."
+                    if _can_finish_research():
+                        all_finished = True
+                        tool_result_content = "Research successfully concluded. Proceed to generation."
+                    else:
+                        tool_result_content = (
+                            "Research is not complete yet. Gather at least one additional "
+                            "non-Wikipedia source before finishing."
+                        )
                 else:
                     raw_query = args.get("query", topic)
                     source = _source_label(func_name)
@@ -147,6 +173,16 @@ class ResearchAgent:
                     )
                     results = await _dispatch_search(source, enriched_query)
                     tool_result_content = json.dumps([_document_payload(r) for r in results])
+                    if results:
+                        if source not in self.active_sources:
+                            self.active_sources.append(source)
+                        refinement = {
+                            "source": source,
+                            "raw_query": raw_query,
+                            "enriched_query": enriched_query,
+                        }
+                        if refinement not in self.query_refinements:
+                            self.query_refinements.append(refinement)
                     for r in results:
                         source, url, title, content = _result_fields(r)
                         documents.append(Document(source=source or self.domain, url=url, title=title, content=content))

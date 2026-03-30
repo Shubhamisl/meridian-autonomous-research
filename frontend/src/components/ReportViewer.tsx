@@ -2,6 +2,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { motion } from 'framer-motion';
 import { Download, Share2, CornerDownRight } from 'lucide-react';
+import { useState } from 'react';
 
 interface ReportProps {
   report: {
@@ -12,6 +13,40 @@ interface ReportProps {
 }
 
 export default function ReportViewer({ report }: ReportProps) {
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
+
+  const handleShare = async () => {
+    const sharePayload = {
+      title: report.query,
+      text: `Meridian report: ${report.query}`,
+      url: window.location.href,
+    };
+
+    try {
+      if (navigator.share) {
+        await navigator.share(sharePayload);
+        setActionMessage('Share sheet opened.');
+        return;
+      }
+
+      await navigator.clipboard.writeText(`${report.query}\n${window.location.href}`);
+      setActionMessage('Workspace link copied to clipboard.');
+    } catch {
+      setActionMessage('Share could not be completed right now.');
+    }
+  };
+
+  const handleDownload = () => {
+    const blob = new Blob([report.markdown_content], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `${report.query.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'meridian-report'}.md`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    setActionMessage('Markdown report downloaded.');
+  };
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 30 }}
@@ -36,14 +71,17 @@ export default function ReportViewer({ report }: ReportProps) {
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
-            <button className="glass-button rounded-xl p-3 group">
+            <button className="glass-button rounded-xl p-3 group" onClick={handleShare} type="button">
               <Share2 className="h-5 w-5 transition-transform group-hover:scale-110" />
             </button>
-            <button className="glass-button rounded-xl p-3 group">
+            <button className="glass-button rounded-xl p-3 group" onClick={handleDownload} type="button">
               <Download className="h-5 w-5 transition-transform group-hover:scale-110" />
             </button>
           </div>
         </div>
+        {actionMessage ? (
+          <p className="mt-4 text-sm text-slate/60">{actionMessage}</p>
+        ) : null}
       </div>
 
       <div className="bg-paper px-8 py-10 md:px-12 md:py-14">

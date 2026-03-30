@@ -1,19 +1,33 @@
 import type { ReactNode } from 'react';
 import { Clock3, LogOut, Search, Sparkles, SquarePen } from 'lucide-react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 
 import { useAuth } from '../../contexts/useAuth';
+import { MODE_PROMPTS, RESEARCH_MODES, type ResearchMode } from '../../lib/research-modes';
 
 interface AppShellProps {
   children: ReactNode;
+  activeMode?: ResearchMode | null;
+  onSelectMode?: (mode: ResearchMode) => void;
 }
 
-const researchModes = ['Biomedical', 'Intelligence', 'Market', 'Legal', 'General'] as const;
-
-export default function AppShell({ children }: AppShellProps) {
+export default function AppShell({ children, activeMode = null, onSelectMode }: AppShellProps) {
   const { pathname } = useLocation();
+  const navigate = useNavigate();
   const { user, logout } = useAuth();
   const inWorkspace = pathname.startsWith('/workspace/');
+
+  const handleModeSelect = (mode: ResearchMode) => {
+    if (onSelectMode) {
+      onSelectMode(mode);
+      if (pathname !== '/dashboard') {
+        navigate('/dashboard', { state: { prefillQuery: MODE_PROMPTS[mode], prefillMode: mode } });
+      }
+      return;
+    }
+
+    navigate('/dashboard', { state: { prefillQuery: MODE_PROMPTS[mode], prefillMode: mode } });
+  };
 
   return (
     <div className="min-h-screen bg-ivory text-ink">
@@ -28,24 +42,27 @@ export default function AppShell({ children }: AppShellProps) {
         <Link
           className="mb-8 inline-flex items-center justify-center gap-2 rounded-2xl bg-teal px-4 py-3 text-sm font-semibold text-white shadow-soft transition hover:bg-teal/90"
           to="/dashboard"
+          state={{ prefillQuery: '' }}
         >
           <SquarePen className="h-4 w-4" />
           <span>New Research</span>
         </Link>
 
         <nav className="flex-1 space-y-1">
-          {researchModes.map((mode) => (
-            <div
+          {RESEARCH_MODES.map((mode) => (
+            <button
               key={mode}
+              type="button"
               className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition ${
-                mode === 'General'
+                mode === activeMode
                   ? 'bg-teal-soft text-teal'
                   : 'text-slate/75 hover:bg-white hover:text-ink'
               }`}
+              onClick={() => handleModeSelect(mode)}
             >
               <Sparkles className="h-4 w-4" />
               <span className="font-medium">{mode}</span>
-            </div>
+            </button>
           ))}
         </nav>
 
@@ -80,7 +97,12 @@ export default function AppShell({ children }: AppShellProps) {
                 <Search className="h-4 w-4" />
                 <span>Search knowledge...</span>
               </div>
-              <button className="rounded-full border border-fog/70 bg-white p-2 text-slate/65 transition hover:text-ink">
+              <button
+                className="rounded-full border border-fog/70 bg-white p-2 text-slate/65 transition hover:text-ink"
+                onClick={() => navigate('/dashboard')}
+                title="Open recent research"
+                type="button"
+              >
                 <Clock3 className="h-4 w-4" />
               </button>
               <div className="hidden items-center gap-3 rounded-full border border-fog/70 bg-white px-3 py-2 md:flex">

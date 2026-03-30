@@ -337,7 +337,13 @@ async def test_run_pipeline_persists_workspace_metadata_via_explicit_stores(monk
     assert job_metadata_store.metadata_by_id[job.id]["format_label"] == "osint"
     assert job_metadata_store.metadata_by_id[job.id]["pipeline"]["current_phase"] == "synthesize"
     assert job_metadata_store.metadata_by_id[job.id]["active_sources"] == ["arxiv"]
-    assert job_metadata_store.metadata_by_id[job.id]["query_refinements"] == []
+    assert job_metadata_store.metadata_by_id[job.id]["query_refinements"] == [
+        {
+            "source": "arxiv",
+            "raw_query": "threat actor report",
+            "enriched_query": '"threat actor report" after:2022-01-01',
+        }
+    ]
     assert report_metadata_store.metadata_by_id[report.id]["domain"] == "computer_science"
     assert report_metadata_store.metadata_by_id[report.id]["format_label"] == "osint"
     assert report_metadata_store.metadata_by_id[report.id]["pipeline"]["current_phase"] == "synthesize"

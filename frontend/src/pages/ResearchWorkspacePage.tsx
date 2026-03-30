@@ -13,15 +13,18 @@ import {
   fetchResearchStatus,
   type ResearchWorkspacePayload,
 } from '../lib/api';
+import { modeFromDomain, type ResearchMode } from '../lib/research-modes';
 
 interface WorkspaceState {
   query?: string;
+  activeMode?: ResearchMode;
 }
 
 export default function ResearchWorkspacePage() {
   const { jobId = '' } = useParams();
   const { state } = useLocation() as { state: WorkspaceState | null };
   const initialQuery = state?.query ?? null;
+  const initialMode = state?.activeMode ?? 'General';
   const { getToken } = useAuth();
   const [jobQuery, setJobQuery] = useState<string | null>(initialQuery);
   const [status, setStatus] = useState('pending');
@@ -30,6 +33,7 @@ export default function ResearchWorkspacePage() {
   const requestSequenceRef = useRef(0);
 
   const query = workspace?.query ?? jobQuery ?? 'Research inquiry';
+  const activeMode = workspace?.domain ? modeFromDomain(workspace.domain) : initialMode;
 
   const loadWorkspace = useCallback(async () => {
     const requestId = ++requestSequenceRef.current;
@@ -95,7 +99,7 @@ export default function ResearchWorkspacePage() {
   }, [loadWorkspace, status, workspace]);
 
   return (
-    <AppShell>
+    <AppShell activeMode={activeMode}>
       <ReportHeader
         jobId={jobId}
         query={query}

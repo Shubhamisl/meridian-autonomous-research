@@ -4,7 +4,7 @@ import { Navigate } from 'react-router-dom';
 import { useAuth } from '../contexts/useAuth';
 
 export default function LoginPage() {
-  const { user, login, isConfigured, setupMessage } = useAuth();
+  const { user, login, isConfigured, setupMessage, authError } = useAuth();
 
   if (user) return <Navigate to="/dashboard" replace />;
 
@@ -71,6 +71,13 @@ export default function LoginPage() {
           </svg>
           <span>{isConfigured ? 'Continue with Google' : 'Google sign-in needs setup'}</span>
         </button>
+
+        {authError ? (
+          <div className="mt-4 rounded-2xl border border-red-300/70 bg-red-50 px-5 py-4 text-left">
+            <div className="section-label !text-red-700 text-[10px]">Sign-in issue</div>
+            <p className="mt-2 text-sm leading-6 text-red-900/85">{authError}</p>
+          </div>
+        ) : null}
 
         {isConfigured ? (
           <div className="mt-8 rounded-2xl border border-fog/70 bg-paper px-5 py-4 text-left">

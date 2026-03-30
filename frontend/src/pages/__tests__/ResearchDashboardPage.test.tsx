@@ -95,12 +95,15 @@ describe('ResearchDashboardPage', () => {
 
     await waitFor(() => {
       expect(navigateMock).toHaveBeenCalledWith('/workspace/job-789', {
-        state: { query: 'How should Meridian track this market?' },
+        state: {
+          query: 'How should Meridian track this market?',
+          activeMode: 'General',
+        },
       });
     });
     expect(mockedCreateResearchJob).toHaveBeenCalledWith(
       getTokenMock,
-      'How should Meridian track this market?',
+      'How should Meridian track this market? Prioritize recent developments and recent evidence where possible. Use multiple complementary sources rather than relying on a single source.',
     );
   });
 });
