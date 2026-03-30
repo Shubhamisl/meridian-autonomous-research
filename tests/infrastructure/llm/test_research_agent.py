@@ -263,3 +263,83 @@ async def test_research_agent_raises_when_model_stops_after_blocked_wikipedia_on
 
     with pytest.raises(RuntimeError, match="non-Wikipedia source"):
         await agent.run("cancer", max_iterations=2)
+
+
+@pytest.mark.asyncio
+async def test_research_agent_raises_when_model_stops_after_blocked_single_source_finish():
+    tools = [
+        {"type": "function", "function": {"name": "search_web", "parameters": {"type": "object"}}},
+        {"type": "function", "function": {"name": "search_arxiv", "parameters": {"type": "object"}}},
+        {"type": "function", "function": {"name": "finish_research", "parameters": {"type": "object"}}},
+    ]
+    classifier = FakeClassifier("general")
+    router = FakeRouter(tools)
+    llm = FakeLLM(
+        [
+            _search_and_finish_calls(("search_web", "semiconductor supply chains")),
+            FakeResponse([]),
+        ]
+    )
+    web_client = FakeSourceClient(
+        Document(
+            source="web",
+            title="Supply chain overview",
+            content="Analyst coverage of semiconductor supply chains.",
+            url="https://example.com/supply-chain",
+        )
+    )
+
+    agent = ResearchAgent(
+        llm,
+        domain_classifier=classifier,
+        source_router=router,
+        web_search_client=web_client,
+    )
+
+    with pytest.raises(RuntimeError, match="could not finish safely"):
+        await agent.run("semiconductor supply chains", max_iterations=2)
+
+
+@pytest.mark.asyncio
+async def test_research_agent_recovers_after_blocked_finish_once_additional_evidence_is_gathered():
+    tools = [
+        {"type": "function", "function": {"name": "search_web", "parameters": {"type": "object"}}},
+        {"type": "function", "function": {"name": "search_arxiv", "parameters": {"type": "object"}}},
+        {"type": "function", "function": {"name": "finish_research", "parameters": {"type": "object"}}},
+    ]
+    classifier = FakeClassifier("general")
+    router = FakeRouter(tools)
+    llm = FakeLLM(
+        [
+            _search_and_finish_calls(("search_web", "battery recycling")),
+            _search_and_finish_calls(("search_arxiv", "battery recycling")),
+        ]
+    )
+    web_client = FakeSourceClient(
+        Document(
+            source="web",
+            title="Battery recycling market",
+            content="Industry reporting on recycling capacity.",
+            url="https://example.com/recycling-market",
+        )
+    )
+    arxiv_client = FakeSourceClient(
+        Document(
+            source="arxiv",
+            title="Battery recycling methods",
+            content="Research paper on recycling methods.",
+            url="https://arxiv.org/abs/1234.5678",
+        )
+    )
+
+    agent = ResearchAgent(
+        llm,
+        domain_classifier=classifier,
+        source_router=router,
+        web_search_client=web_client,
+        arxiv_client=arxiv_client,
+    )
+
+    documents = await agent.run("battery recycling", max_iterations=2)
+
+    assert [document.source for document in documents] == ["web", "arxiv"]

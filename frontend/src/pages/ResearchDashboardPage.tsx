@@ -15,18 +15,24 @@ import {
 } from '../lib/api';
 import { type ResearchMode } from '../lib/research-modes';
 
+function createDefaultAdvancedOptions(): AdvancedResearchOptions {
+  return {
+    recentOnly: true,
+    requireMultipleSources: true,
+    reportDepth: 'standard',
+  };
+}
+
 export default function ResearchDashboardPage() {
   const navigate = useNavigate();
-  const { state } = useLocation() as { state: { prefillQuery?: string; prefillMode?: ResearchMode } | null };
+  const { state } = useLocation() as {
+    state: { prefillQuery?: string; prefillMode?: ResearchMode; resetComposer?: boolean } | null;
+  };
   const { getToken } = useAuth();
   const [query, setQuery] = useState('');
   const [activeMode, setActiveMode] = useState<ResearchMode>('General');
   const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [advancedOptions, setAdvancedOptions] = useState<AdvancedResearchOptions>({
-    recentOnly: true,
-    requireMultipleSources: true,
-    reportDepth: 'standard',
-  });
+  const [advancedOptions, setAdvancedOptions] = useState<AdvancedResearchOptions>(createDefaultAdvancedOptions);
   const [jobs, setJobs] = useState<ResearchJobSummary[]>([]);
   const [localQueries, setLocalQueries] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
@@ -47,7 +53,11 @@ export default function ResearchDashboardPage() {
     if (state?.prefillMode) {
       setActiveMode(state.prefillMode);
     }
-  }, [state?.prefillMode, state?.prefillQuery]);
+    if (state?.resetComposer) {
+      setAdvancedOpen(false);
+      setAdvancedOptions(createDefaultAdvancedOptions());
+    }
+  }, [state?.prefillMode, state?.prefillQuery, state?.resetComposer]);
 
   useEffect(() => {
     void loadJobs();

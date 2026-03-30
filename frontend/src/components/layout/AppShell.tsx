@@ -43,7 +43,7 @@ export default function AppShell({ children, activeMode = null, onSelectMode }: 
           className="mb-8 inline-flex items-center justify-center gap-2 rounded-2xl bg-teal px-4 py-3 text-sm font-semibold text-white shadow-soft transition hover:bg-teal/90"
           onClick={() =>
             navigate('/dashboard', {
-              state: { prefillQuery: '', prefillMode: 'General' },
+              state: { prefillQuery: '', prefillMode: 'General', resetComposer: true },
             })
           }
           type="button"

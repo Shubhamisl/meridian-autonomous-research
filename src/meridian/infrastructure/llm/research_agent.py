@@ -71,6 +71,7 @@ class ResearchAgent:
         ]
 
         documents: list[Document] = []
+        finish_research_blocked = False
         available_search_tools = [
             tool["function"]["name"]
             for tool in tools
@@ -140,6 +141,18 @@ class ResearchAgent:
             unique_sources = {document.source for document in documents if document.source}
             return unique_sources == {"wikipedia"}
 
+        def _raise_incomplete_research_error() -> None:
+            if _has_wikipedia_only_evidence():
+                raise RuntimeError(
+                    "Research could not finish safely: gather at least one additional non-Wikipedia source "
+                    "before completing."
+                )
+
+            raise RuntimeError(
+                "Research could not finish safely: finish_research was blocked because the evidence "
+                "is still insufficient. Gather additional complementary sources before completing."
+            )
+
         for _ in range(max_iterations):
             response = await self.llm.generate_response(messages=messages, tools=tools)
             response_message = response.model_dump(exclude_unset=True)
@@ -161,8 +174,10 @@ class ResearchAgent:
                 if func_name == "finish_research":
                     if _can_finish_research():
                         all_finished = True
+                        finish_research_blocked = False
                         tool_result_content = "Research successfully concluded. Proceed to generation."
                     else:
+                        finish_research_blocked = True
                         tool_result_content = (
                             "Research is not complete yet. Gather at least one additional "
                             "non-Wikipedia source before finishing."
@@ -205,10 +220,10 @@ class ResearchAgent:
             if all_finished:
                 break
 
+        if finish_research_blocked:
+            _raise_incomplete_research_error()
+
         if _has_wikipedia_only_evidence():
-            raise RuntimeError(
-                "Research could not finish safely: gather at least one additional non-Wikipedia source "
-                "before completing."
-            )
+            _raise_incomplete_research_error()
 
         return documents

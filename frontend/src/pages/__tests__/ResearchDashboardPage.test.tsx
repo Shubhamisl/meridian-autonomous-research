@@ -4,10 +4,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import ResearchDashboardPage from '../ResearchDashboardPage';
 import { renderWithProviders } from '../../test/render-with-providers';
 import { createResearchJob, fetchResearchJobs } from '../../lib/api';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 
 const navigateMock = vi.fn();
 const getTokenMock = vi.fn(async () => 'token-123');
+const locationMock = vi.fn();
 
 let authState = {
   user: { uid: 'user-1' },
@@ -37,12 +38,14 @@ vi.mock('react-router-dom', async (importOriginal) => {
 
   return {
     ...actual,
+    useLocation: vi.fn(),
     useNavigate: vi.fn(),
   };
 });
 
 const mockedFetchResearchJobs = vi.mocked(fetchResearchJobs);
 const mockedCreateResearchJob = vi.mocked(createResearchJob);
+const mockedUseLocation = vi.mocked(useLocation);
 const mockedUseNavigate = vi.mocked(useNavigate);
 
 describe('ResearchDashboardPage', () => {
@@ -54,6 +57,15 @@ describe('ResearchDashboardPage', () => {
     mockedFetchResearchJobs.mockReset();
     mockedCreateResearchJob.mockReset();
     navigateMock.mockReset();
+    locationMock.mockReset();
+    locationMock.mockReturnValue({
+      pathname: '/dashboard',
+      search: '',
+      hash: '',
+      key: 'dashboard',
+      state: null,
+    });
+    mockedUseLocation.mockImplementation(locationMock);
     mockedUseNavigate.mockReturnValue(navigateMock);
     getTokenMock.mockResolvedValue('token-123');
   });
@@ -117,7 +129,56 @@ describe('ResearchDashboardPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /new research/i }));
 
     expect(navigateMock).toHaveBeenLastCalledWith('/dashboard', {
-      state: { prefillQuery: '', prefillMode: 'General' },
+      state: { prefillQuery: '', prefillMode: 'General', resetComposer: true },
     });
+  });
+
+  it('resets hidden advanced parameters on the explicit New Research flow', async () => {
+    mockedFetchResearchJobs.mockResolvedValue([]);
+    locationMock.mockReturnValue({
+      pathname: '/dashboard',
+      search: '',
+      hash: '',
+      key: 'dashboard',
+      state: null,
+    });
+
+    const { rerender } = renderWithProviders(<ResearchDashboardPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /advanced parameters/i }));
+    fireEvent.click(screen.getByRole('button', { name: /deep-dive synthesis/i }));
+    fireEvent.click(screen.getByRole('checkbox', {
+      name: /prefer the most recent available evidence/i,
+    }));
+    fireEvent.click(screen.getByRole('checkbox', {
+      name: /push meridian to use multiple complementary sources/i,
+    }));
+    fireEvent.click(screen.getByRole('button', { name: /hide advanced parameters/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^intelligence$/i }));
+
+    locationMock.mockReturnValue({
+      pathname: '/dashboard',
+      search: '',
+      hash: '',
+      key: 'dashboard-reset',
+      state: { prefillQuery: '', prefillMode: 'General', resetComposer: true },
+    });
+    rerender(<ResearchDashboardPage />);
+
+    expect(screen.getByPlaceholderText(/describe your research objective/i)).toHaveValue('');
+    fireEvent.click(screen.getByRole('button', { name: /advanced parameters/i }));
+
+    const recentOnlyCheckbox = screen.getByRole('checkbox', {
+      name: /prefer the most recent available evidence/i,
+    });
+    const multipleSourcesCheckbox = screen.getByRole('checkbox', {
+      name: /push meridian to use multiple complementary sources/i,
+    });
+
+    expect(screen.getByText('Mode Focus')).toBeInTheDocument();
+    expect(screen.getAllByText('General').length).toBeGreaterThan(0);
+    expect(recentOnlyCheckbox).toBeChecked();
+    expect(multipleSourcesCheckbox).toBeChecked();
+    expect(screen.getByRole('button', { name: /standard report/i })).toHaveClass('border-teal/30');
   });
 });
