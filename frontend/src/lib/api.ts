@@ -71,12 +71,12 @@ export async function fetchResearchJobs(getToken: () => Promise<string | null>) 
 export async function createResearchJob(
   getToken: () => Promise<string | null>,
   query: string,
-  displayQuery = query,
+  executionQuery = query,
 ) {
   const response = await authFetch(getToken, '/api/research/', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query, display_query: displayQuery }),
+    body: JSON.stringify({ query, execution_query: executionQuery }),
   });
 
   if (!response.ok) throw new Error('Failed to start research');

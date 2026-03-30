@@ -88,7 +88,7 @@ export default function ResearchDashboardPage() {
       }
 
       const finalQuery = queryParts.join(' ');
-      const created = await createResearchJob(getToken, finalQuery, query);
+      const created = await createResearchJob(getToken, query, finalQuery);
       setLocalQueries((current) => ({ ...current, [created.id]: query }));
       setJobs((current) => [{ ...created, query }, ...current]);
       navigate(`/workspace/${created.id}`, { state: { query, activeMode } });

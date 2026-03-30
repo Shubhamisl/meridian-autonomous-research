@@ -39,14 +39,18 @@ export default function AppShell({ children, activeMode = null, onSelectMode }: 
           </p>
         </div>
 
-        <Link
+        <button
           className="mb-8 inline-flex items-center justify-center gap-2 rounded-2xl bg-teal px-4 py-3 text-sm font-semibold text-white shadow-soft transition hover:bg-teal/90"
-          to="/dashboard"
-          state={{ prefillQuery: '' }}
+          onClick={() =>
+            navigate('/dashboard', {
+              state: { prefillQuery: '', prefillMode: 'General' },
+            })
+          }
+          type="button"
         >
           <SquarePen className="h-4 w-4" />
           <span>New Research</span>
-        </Link>
+        </button>
 
         <nav className="flex-1 space-y-1">
           {RESEARCH_MODES.map((mode) => (

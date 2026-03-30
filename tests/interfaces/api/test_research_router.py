@@ -76,7 +76,7 @@ async def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         completed_report = DBResearchReport(
             id="report-123",
             job_id="job-123",
-            query="threat actor report after:2022-01-01",
+            query="threat actor report",
             markdown_content="# Threat Actor Report",
             created_at=datetime(2024, 1, 1, 0, 0, 0),
             workspace_metadata=json.dumps(
@@ -84,6 +84,7 @@ async def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
                     "domain": "computer_science",
                     "format_label": "osint",
                     "display_query": "threat actor report",
+                    "execution_query": "threat actor report after:2022-01-01",
                     "current_phase": "synthesize",
                     "pipeline": {
                         "current_phase": "synthesize",
@@ -96,7 +97,7 @@ async def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         completed_job = DBResearchJob(
             id="job-123",
             user_id="user-123",
-            query="threat actor report after:2022-01-01",
+            query="threat actor report",
             status="completed",
             created_at=datetime(2024, 1, 1, 0, 0, 0),
             completed_at=datetime(2024, 1, 1, 0, 30, 0),
@@ -106,6 +107,7 @@ async def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
                     "domain": "computer_science",
                     "format_label": "osint",
                     "display_query": "threat actor report",
+                    "execution_query": "threat actor report after:2022-01-01",
                     "current_phase": "synthesize",
                     "pipeline": {
                         "current_phase": "synthesize",
@@ -191,7 +193,7 @@ async def test_get_research_report_returns_null_phase_when_workspace_phase_is_un
         DBResearchJob(
             id="job-no-phase",
             user_id="user-123",
-            query="threat actor report after:2022-01-01",
+            query="threat actor report",
             status="completed",
             created_at=datetime(2024, 1, 1, 0, 0, 0),
             completed_at=datetime(2024, 1, 1, 0, 30, 0),
@@ -201,6 +203,7 @@ async def test_get_research_report_returns_null_phase_when_workspace_phase_is_un
                     "domain": "computer_science",
                     "format_label": "osint",
                     "display_query": "threat actor report",
+                    "execution_query": "threat actor report after:2022-01-01",
                     "active_sources": ["arxiv"],
                 }
             ),
@@ -210,7 +213,7 @@ async def test_get_research_report_returns_null_phase_when_workspace_phase_is_un
         DBResearchReport(
             id="report-no-phase",
             job_id="job-no-phase",
-            query="threat actor report after:2022-01-01",
+            query="threat actor report",
             markdown_content="# Threat Actor Report",
             created_at=datetime(2024, 1, 1, 0, 0, 0),
             workspace_metadata=json.dumps(
@@ -218,6 +221,7 @@ async def test_get_research_report_returns_null_phase_when_workspace_phase_is_un
                     "domain": "computer_science",
                     "format_label": "osint",
                     "display_query": "threat actor report",
+                    "execution_query": "threat actor report after:2022-01-01",
                     "active_sources": ["arxiv"],
                 }
             ),
@@ -299,8 +303,8 @@ async def test_create_research_commits_job_before_queue_dispatch(tmp_path: Path,
             "/research/",
             headers=auth_headers(),
             json={
-                "query": "fresh research after:2022-01-01",
-                "display_query": "fresh research",
+                "query": "fresh research",
+                "execution_query": "fresh research after:2022-01-01",
             },
         )
 
@@ -312,6 +316,8 @@ async def test_create_research_commits_job_before_queue_dispatch(tmp_path: Path,
 
     assert response.status_code == 200
     assert stored_job is not None
-    assert stored_job.query == "fresh research after:2022-01-01"
-    assert json.loads(stored_job.workspace_metadata)["display_query"] == "fresh research"
+    assert stored_job.query == "fresh research"
+    metadata = json.loads(stored_job.workspace_metadata)
+    assert metadata["display_query"] == "fresh research"
+    assert metadata["execution_query"] == "fresh research after:2022-01-01"
     assert response.json()["query"] == "fresh research"

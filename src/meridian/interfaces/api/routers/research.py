@@ -32,7 +32,7 @@ async def get_db():
 
 class ResearchRequest(BaseModel):
     query: str
-    display_query: str | None = None
+    execution_query: str | None = None
 
 class ResearchResponse(BaseModel):
     id: str
@@ -142,6 +142,7 @@ def build_explainability_payload(metadata: dict, *, query: str, domain: str | No
 def _normalize_pipeline_phase(candidate: object) -> str | None:
     return candidate if isinstance(candidate, str) and candidate in PHASES else None
 
+
 @router.post("/", response_model=ResearchResponse)
 async def create_research(
     request: ResearchRequest,
@@ -153,7 +154,8 @@ async def create_research(
 
     await job_repo.save(job)
     workspace_metadata = await job_repo.get_workspace_metadata(job.id)
-    workspace_metadata["display_query"] = request.display_query or request.query
+    workspace_metadata["display_query"] = request.query
+    workspace_metadata["execution_query"] = request.execution_query or request.query
     await job_repo.save_workspace_metadata(job.id, workspace_metadata)
     await db.commit()
 

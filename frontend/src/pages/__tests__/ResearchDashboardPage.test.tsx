@@ -103,8 +103,21 @@ describe('ResearchDashboardPage', () => {
     });
     expect(mockedCreateResearchJob).toHaveBeenCalledWith(
       getTokenMock,
-      'How should Meridian track this market? Prioritize recent developments and recent evidence where possible. Use multiple complementary sources rather than relying on a single source.',
       'How should Meridian track this market?',
+      'How should Meridian track this market? Prioritize recent developments and recent evidence where possible. Use multiple complementary sources rather than relying on a single source.',
     );
+  });
+
+  it('resets mode to General when starting a new research from the dashboard', async () => {
+    mockedFetchResearchJobs.mockResolvedValue([]);
+
+    renderWithProviders(<ResearchDashboardPage />);
+
+    fireEvent.click(screen.getByRole('button', { name: /^intelligence$/i }));
+    fireEvent.click(screen.getByRole('button', { name: /new research/i }));
+
+    expect(navigateMock).toHaveBeenLastCalledWith('/dashboard', {
+      state: { prefillQuery: '', prefillMode: 'General' },
+    });
   });
 });
