@@ -106,8 +106,10 @@ class RelevanceScorer:
         if len(token) > 2:
             return token.lower()
 
-        if token.isalpha() and token.isupper():
-            return token
+        if token.isalpha() and len(token) == 2:
+            normalized = token.upper()
+            if normalized in {"AI", "ML", "EU", "US", "UK"}:
+                return normalized
 
         return None
 

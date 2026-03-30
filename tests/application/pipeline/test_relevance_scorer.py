@@ -43,6 +43,22 @@ async def test_score_keeps_short_acronyms_in_lexical_overlap():
 
 
 @pytest.mark.asyncio
+async def test_score_keeps_short_acronyms_when_query_and_document_use_lowercase():
+    scorer = RelevanceScorer(policy=ReliabilityPolicy())
+    document = Document(
+        source="general",
+        url="https://example.com/eu-ai",
+        title="ai policy overview",
+        content="ai governance in the eu and us.",
+    )
+
+    assessment = await scorer.score("ai regulation in eu", document)
+
+    assert assessment.score >= scorer.policy.relevance.auto_reject_below
+    assert assessment.reason != "lexical_mismatch"
+
+
+@pytest.mark.asyncio
 async def test_score_rejects_obvious_topic_mismatch_without_llm():
     scorer = RelevanceScorer(policy=ReliabilityPolicy())
     document = Document(
