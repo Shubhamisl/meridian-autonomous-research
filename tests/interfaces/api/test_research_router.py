@@ -76,13 +76,14 @@ async def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         completed_report = DBResearchReport(
             id="report-123",
             job_id="job-123",
-            query="threat actor report",
+            query="threat actor report after:2022-01-01",
             markdown_content="# Threat Actor Report",
             created_at=datetime(2024, 1, 1, 0, 0, 0),
             workspace_metadata=json.dumps(
                 {
                     "domain": "computer_science",
                     "format_label": "osint",
+                    "display_query": "threat actor report",
                     "current_phase": "synthesize",
                     "pipeline": {
                         "current_phase": "synthesize",
@@ -95,7 +96,7 @@ async def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         completed_job = DBResearchJob(
             id="job-123",
             user_id="user-123",
-            query="threat actor report",
+            query="threat actor report after:2022-01-01",
             status="completed",
             created_at=datetime(2024, 1, 1, 0, 0, 0),
             completed_at=datetime(2024, 1, 1, 0, 30, 0),
@@ -104,6 +105,7 @@ async def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
                 {
                     "domain": "computer_science",
                     "format_label": "osint",
+                    "display_query": "threat actor report",
                     "current_phase": "synthesize",
                     "pipeline": {
                         "current_phase": "synthesize",
@@ -130,6 +132,7 @@ async def test_get_research_report_returns_workspace_metadata(client):
 
     assert response.status_code == 200
     payload = response.json()
+    assert payload["query"] == "threat actor report"
     assert payload["domain"] == "computer_science"
     assert payload["format_label"] == "osint"
     assert payload["pipeline"]["current_phase"] == "synthesize"
@@ -185,38 +188,40 @@ async def test_get_research_report_returns_null_phase_when_workspace_phase_is_un
 
     async with session_factory() as session:
         session.add(
-            DBResearchJob(
-                id="job-no-phase",
-                user_id="user-123",
-                query="threat actor report",
-                status="completed",
-                created_at=datetime(2024, 1, 1, 0, 0, 0),
-                completed_at=datetime(2024, 1, 1, 0, 30, 0),
-                error_message=None,
-                workspace_metadata=json.dumps(
-                    {
-                        "domain": "computer_science",
-                        "format_label": "osint",
-                        "active_sources": ["arxiv"],
-                    }
-                ),
+        DBResearchJob(
+            id="job-no-phase",
+            user_id="user-123",
+            query="threat actor report after:2022-01-01",
+            status="completed",
+            created_at=datetime(2024, 1, 1, 0, 0, 0),
+            completed_at=datetime(2024, 1, 1, 0, 30, 0),
+            error_message=None,
+            workspace_metadata=json.dumps(
+                {
+                    "domain": "computer_science",
+                    "format_label": "osint",
+                    "display_query": "threat actor report",
+                    "active_sources": ["arxiv"],
+                }
+            ),
             )
         )
         session.add(
-            DBResearchReport(
-                id="report-no-phase",
-                job_id="job-no-phase",
-                query="threat actor report",
-                markdown_content="# Threat Actor Report",
-                created_at=datetime(2024, 1, 1, 0, 0, 0),
-                workspace_metadata=json.dumps(
-                    {
-                        "domain": "computer_science",
-                        "format_label": "osint",
-                        "active_sources": ["arxiv"],
-                    }
-                ),
-            )
+        DBResearchReport(
+            id="report-no-phase",
+            job_id="job-no-phase",
+            query="threat actor report after:2022-01-01",
+            markdown_content="# Threat Actor Report",
+            created_at=datetime(2024, 1, 1, 0, 0, 0),
+            workspace_metadata=json.dumps(
+                {
+                    "domain": "computer_science",
+                    "format_label": "osint",
+                    "display_query": "threat actor report",
+                    "active_sources": ["arxiv"],
+                }
+            ),
+        )
         )
         await session.commit()
 
@@ -228,6 +233,7 @@ async def test_get_research_report_returns_null_phase_when_workspace_phase_is_un
 
     assert response.status_code == 200
     payload = response.json()
+    assert payload["query"] == "threat actor report"
     assert payload["pipeline"]["current_phase"] is None
 
 
@@ -292,7 +298,10 @@ async def test_create_research_commits_job_before_queue_dispatch(tmp_path: Path,
         response = await async_client.post(
             "/research/",
             headers=auth_headers(),
-            json={"query": "fresh research"},
+            json={
+                "query": "fresh research after:2022-01-01",
+                "display_query": "fresh research",
+            },
         )
 
     async with session_factory() as session:
@@ -303,4 +312,6 @@ async def test_create_research_commits_job_before_queue_dispatch(tmp_path: Path,
 
     assert response.status_code == 200
     assert stored_job is not None
-    assert stored_job.query == "fresh research"
+    assert stored_job.query == "fresh research after:2022-01-01"
+    assert json.loads(stored_job.workspace_metadata)["display_query"] == "fresh research"
+    assert response.json()["query"] == "fresh research"

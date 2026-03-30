@@ -104,6 +104,7 @@ describe('ResearchDashboardPage', () => {
     expect(mockedCreateResearchJob).toHaveBeenCalledWith(
       getTokenMock,
       'How should Meridian track this market? Prioritize recent developments and recent evidence where possible. Use multiple complementary sources rather than relying on a single source.',
+      'How should Meridian track this market?',
     );
   });
 });

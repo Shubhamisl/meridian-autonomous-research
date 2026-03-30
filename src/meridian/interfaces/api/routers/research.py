@@ -32,11 +32,17 @@ async def get_db():
 
 class ResearchRequest(BaseModel):
     query: str
+    display_query: str | None = None
 
 class ResearchResponse(BaseModel):
     id: str
     status: str
     query: str | None = None
+
+
+def _display_query(metadata: dict, fallback: str) -> str:
+    candidate = metadata.get("display_query")
+    return candidate if isinstance(candidate, str) and candidate else fallback
 
 
 def _ensure_job_owner(job: ResearchJob, user: dict) -> None:
@@ -146,6 +152,9 @@ async def create_research(
     job = ResearchJob(query=request.query, user_id=user["uid"])
 
     await job_repo.save(job)
+    workspace_metadata = await job_repo.get_workspace_metadata(job.id)
+    workspace_metadata["display_query"] = request.display_query or request.query
+    await job_repo.save_workspace_metadata(job.id, workspace_metadata)
     await db.commit()
 
     try:
@@ -156,7 +165,11 @@ async def create_research(
         await job_repo.save(job)
         await db.commit()
 
-    return ResearchResponse(id=job.id, status=job.status, query=job.query)
+    return ResearchResponse(
+        id=job.id,
+        status=job.status,
+        query=_display_query(workspace_metadata, job.query),
+    )
 
 @router.get("/", response_model=list[ResearchResponse])
 async def list_user_research(
@@ -170,7 +183,17 @@ async def list_user_research(
         .order_by(DBResearchJob.created_at.desc())
     )
     jobs = result.scalars().all()
-    return [ResearchResponse(id=j.id, status=j.status, query=j.query) for j in jobs]
+    responses = []
+    for job in jobs:
+        metadata = await SQLiteResearchJobRepository(db).get_workspace_metadata(job.id)
+        responses.append(
+            ResearchResponse(
+                id=job.id,
+                status=job.status,
+                query=_display_query(metadata, job.query),
+            )
+        )
+    return responses
 
 @router.get("/{job_id}", response_model=ResearchResponse)
 async def get_research_status(
@@ -184,7 +207,8 @@ async def get_research_status(
         raise HTTPException(status_code=404, detail="Job not found")
     _ensure_job_owner(job, user)
 
-    return ResearchResponse(id=job.id, status=job.status, query=job.query)
+    metadata = await job_repo.get_workspace_metadata(job.id)
+    return ResearchResponse(id=job.id, status=job.status, query=_display_query(metadata, job.query))
 
 @router.get("/{job_id}/report", response_model=ResearchWorkspaceResponse)
 async def get_research_report(
@@ -205,7 +229,8 @@ async def get_research_report(
         **(await _workspace_metadata(job_repo, job.id)),
         **(await _workspace_metadata(report_repo, report.id)),
     }
-    workspace_metadata.setdefault("query", report.query)
+    response_query = _display_query(workspace_metadata, report.query)
+    workspace_metadata.setdefault("query", response_query)
     evidence_chunks = []
     if ChromaChunkRepository is not None:
         try:
@@ -229,7 +254,7 @@ async def get_research_report(
     return ResearchWorkspaceResponse(
         id=report.id,
         job_id=report.job_id,
-        query=report.query,
+        query=response_query,
         markdown_content=report.markdown_content,
         domain=workspace_metadata.get("domain"),
         format_label=workspace_metadata.get("format_label"),
@@ -237,7 +262,7 @@ async def get_research_report(
         evidence=build_evidence_items(evidence_chunks),
         explainability=build_explainability_payload(
             workspace_metadata,
-            query=report.query,
+            query=response_query,
             domain=workspace_metadata.get("domain"),
         ),
     )
