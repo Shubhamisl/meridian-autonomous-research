@@ -458,6 +458,20 @@ For each fixture, assert:
 - accepted evidence remains on-topic
 - synthesis is blocked when evidence is inadequate
 
+Each regression fixture must be structured, not just named. Every fixture definition should include:
+
+- input query
+- expected domain
+- expected source families allowed or preferred
+- example candidate documents that should be accepted
+- example candidate documents that should be rejected
+- expected minimum accepted evidence count
+- expected coverage verdict
+- whether retry is expected
+- whether synthesis should proceed or fail
+
+This turns the fixture set into a true regression contract rather than a loose benchmark list.
+
 ### 3. Evaluation harness
 
 Add an evaluation workflow that scores:
