@@ -6,11 +6,19 @@ from src.meridian.domain.entities import Document
 
 
 class FakeAssessment:
-    def __init__(self, score: float, reason: str, llm_attempted: bool = False, llm_success: bool = False):
+    def __init__(
+        self,
+        score: float,
+        reason: str,
+        llm_attempted: bool = False,
+        llm_success: bool = False,
+        detail: str | None = None,
+    ):
         self.score = score
         self.reason = reason
         self.llm_attempted = llm_attempted
         self.llm_success = llm_success
+        self.detail = detail
 
 
 class FakeRelevanceScorer:
@@ -18,7 +26,7 @@ class FakeRelevanceScorer:
         self.assessments = assessments
         self.calls = []
 
-    async def score(self, query: str, document: Document):
+    async def score(self, query: str, document: Document, llm_budget_remaining: int | None = None):
         self.calls.append((query, document.title, document.url))
         return self.assessments[(document.title, document.url)]
 
@@ -82,3 +90,41 @@ async def test_select_collapses_duplicates_before_scoring():
     assert result.rejected[0].reason == "duplicate"
     assert result.rejected[0].relevance_score == 0.83
     assert len(scorer.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_select_preserves_provenance_and_scorer_detail():
+    document = Document(
+        source="semantic_scholar",
+        url="https://example.com/ai-eu",
+        title="AI regulation in the EU",
+        content="A discussion of AI governance.",
+    )
+    scorer = FakeRelevanceScorer(
+        {
+            (document.title, document.url): FakeAssessment(
+                0.78,
+                "llm_adjudicated",
+                llm_attempted=True,
+                llm_success=True,
+                detail="aligned with query terms",
+            ),
+        }
+    )
+    service = EvidenceSelectionService(policy=ReliabilityPolicy(), relevance_scorer=scorer)
+
+    result = await service.select(
+        query="AI regulation in EU",
+        domain="general",
+        candidates=[document],
+        source_queries={"semantic_scholar": "AI regulation in EU"},
+    )
+
+    assert len(result.accepted) == 1
+    decision = result.accepted[0]
+    assert decision.reason == "accepted"
+    assert decision.scorer_reason == "llm_adjudicated"
+    assert decision.scorer_detail == "aligned with query terms"
+    assert decision.source_query == "AI regulation in EU"
+    assert decision.adjudication_detail == "aligned with query terms"
+    assert result.source_queries["semantic_scholar"] == "AI regulation in EU"

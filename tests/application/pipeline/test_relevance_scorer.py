@@ -27,6 +27,22 @@ class FakeOpenRouterClient:
 
 
 @pytest.mark.asyncio
+async def test_score_keeps_short_acronyms_in_lexical_overlap():
+    scorer = RelevanceScorer(policy=ReliabilityPolicy())
+    document = Document(
+        source="general",
+        url="https://example.com/eu-ai",
+        title="EU AI policy overview",
+        content="AI governance in the EU and US.",
+    )
+
+    assessment = await scorer.score("AI regulation in EU", document)
+
+    assert assessment.score >= scorer.policy.relevance.auto_reject_below
+    assert assessment.reason != "lexical_mismatch"
+
+
+@pytest.mark.asyncio
 async def test_score_rejects_obvious_topic_mismatch_without_llm():
     scorer = RelevanceScorer(policy=ReliabilityPolicy())
     document = Document(
@@ -82,3 +98,22 @@ async def test_score_falls_back_deterministically_when_llm_is_missing_or_bad():
     assert assessment.llm_success is False
     assert assessment.score < scorer.policy.relevance.borderline_below
     assert client.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_score_respects_request_scoped_llm_budget():
+    client = FakeOpenRouterClient(['{"score": 0.81, "reason": "relevant"}'])
+    scorer = RelevanceScorer(openrouter_client=client, policy=ReliabilityPolicy())
+    document = Document(
+        source="pubmed",
+        url="https://example.com/gene",
+        title="Gene therapy review",
+        content="A review of related therapies.",
+    )
+
+    first = await scorer.score("gene therapy crispr", document, llm_budget_remaining=1)
+    second = await scorer.score("gene therapy crispr", document, llm_budget_remaining=1)
+
+    assert first.reason == "llm_adjudicated"
+    assert second.reason == "llm_adjudicated"
+    assert client.calls == 2
