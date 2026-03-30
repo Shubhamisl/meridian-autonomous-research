@@ -19,7 +19,14 @@ def auth_headers() -> dict[str, str]:
 
 
 class FakeChunkRepository:
+    last_call = None
+
+    def __init__(self):
+        self.calls = []
+
     async def search(self, job_id: str, query: str, top_k: int = 5) -> list[Chunk]:
+        FakeChunkRepository.last_call = (job_id, query, top_k)
+        self.calls.append((job_id, query, top_k))
         return [
             Chunk(
                 document_id="doc-1",
@@ -69,6 +76,7 @@ async def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         return {"uid": "user-123", "email": "user@example.com"}
 
     monkeypatch.setattr(research, "ChromaChunkRepository", FakeChunkRepository, raising=False)
+    FakeChunkRepository.last_call = None
     app.dependency_overrides[research.get_db] = override_get_db
     app.dependency_overrides[get_current_user] = override_get_current_user
 
@@ -91,6 +99,18 @@ async def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
                         "phases": ["research", "chunk", "retrieve", "synthesize"],
                     },
                     "active_sources": ["arxiv", "ieee", "web"],
+                    "query_refinements": [
+                        {
+                            "source": "arxiv",
+                            "raw_query": "threat actor report after:2022-01-01",
+                            "enriched_query": '"threat actor report after:2022-01-01" after:2022-01-01',
+                        },
+                        {
+                            "source": "ieee",
+                            "raw_query": "threat actor report after:2022-01-01",
+                            "enriched_query": "threat actor report after:2022-01-01",
+                        },
+                    ],
                 }
             ),
         )
@@ -139,22 +159,18 @@ async def test_get_research_report_returns_workspace_metadata(client):
     assert payload["format_label"] == "osint"
     assert payload["pipeline"]["current_phase"] == "synthesize"
     assert payload["evidence"][0]["source"] == "arxiv"
+    assert FakeChunkRepository.last_call == ("job-123", "threat actor report after:2022-01-01", 10)
     assert payload["explainability"]["active_sources"] == ["arxiv", "ieee", "web"]
     assert payload["explainability"]["query_refinements"] == [
         {
             "source": "arxiv",
-            "raw_query": "threat actor report",
-            "enriched_query": '"threat actor report" after:2022-01-01',
+            "raw_query": "threat actor report after:2022-01-01",
+            "enriched_query": '"threat actor report after:2022-01-01" after:2022-01-01',
         },
         {
             "source": "ieee",
-            "raw_query": "threat actor report",
+            "raw_query": "threat actor report after:2022-01-01",
             "enriched_query": "threat actor report after:2022-01-01",
-        },
-        {
-            "source": "web",
-            "raw_query": "threat actor report",
-            "enriched_query": "threat actor report after:2022-01-01 -site:reddit.com -site:quora.com",
         },
     ]
 

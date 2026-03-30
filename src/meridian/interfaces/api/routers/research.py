@@ -93,7 +93,13 @@ def build_evidence_items(chunks: list) -> list[EvidenceItem]:
     return evidence_items
 
 
-def build_explainability_payload(metadata: dict, *, query: str, domain: str | None) -> ExplainabilityPayload:
+def build_explainability_payload(
+    metadata: dict,
+    *,
+    query: str,
+    domain: str | None,
+    execution_query: str | None = None,
+) -> ExplainabilityPayload:
     active_sources = metadata.get("active_sources", [])
     if not isinstance(active_sources, list):
         active_sources = []
@@ -123,11 +129,12 @@ def build_explainability_payload(metadata: dict, *, query: str, domain: str | No
         from src.meridian.application.pipeline.query_processor import QueryProcessor
 
         processor = QueryProcessor()
+        fallback_query = execution_query if isinstance(execution_query, str) and execution_query else query
         normalized_refinements = [
             QueryRefinement(
                 source=source,
-                raw_query=query,
-                enriched_query=processor.enrich(query, domain or "general", source),
+                raw_query=fallback_query,
+                enriched_query=processor.enrich(fallback_query, domain or "general", source),
             )
             for source in active_sources
             if isinstance(source, str) and source
@@ -237,7 +244,10 @@ async def get_research_report(
     if ChromaChunkRepository is not None:
         try:
             chunk_repo = ChromaChunkRepository()
-            evidence_chunks = await chunk_repo.search(job_id, query=report.query, top_k=10)
+            evidence_query = workspace_metadata.get("execution_query")
+            if not isinstance(evidence_query, str) or not evidence_query:
+                evidence_query = report.query
+            evidence_chunks = await chunk_repo.search(job_id, query=evidence_query, top_k=10)
         except Exception as exc:
             logging.warning("Failed to load evidence for job %s: %s", job_id, exc)
 
@@ -266,5 +276,6 @@ async def get_research_report(
             workspace_metadata,
             query=response_query,
             domain=workspace_metadata.get("domain"),
+            execution_query=workspace_metadata.get("execution_query"),
         ),
     )

@@ -367,8 +367,8 @@ async def test_run_pipeline_persists_workspace_metadata_via_explicit_stores(monk
     assert job_metadata_store.metadata_by_id[job.id]["query_refinements"] == [
         {
             "source": "arxiv",
-            "raw_query": "threat actor report",
-            "enriched_query": '"threat actor report" after:2022-01-01',
+            "raw_query": "threat actor report after:2022-01-01",
+            "enriched_query": '"threat actor report after:2022-01-01" after:2022-01-01',
         }
     ]
     assert log == [
