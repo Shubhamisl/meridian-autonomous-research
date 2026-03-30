@@ -4,6 +4,7 @@ from typing import List
 
 from src.meridian.application.pipeline.query_processor import QueryProcessor
 from src.meridian.application.pipeline.domain_classifier import DomainClassifier
+from src.meridian.application.pipeline.source_query_planner import SourceQueryPlanner
 from src.meridian.application.pipeline.source_router import SourceRouter
 from src.meridian.domain.entities import Document
 from src.meridian.infrastructure.external_apis.arxiv_client import ArXivClient
@@ -31,6 +32,7 @@ class ResearchAgent:
         ieee_client: IEEEClient | None = None,
         semantic_scholar_client: SemanticScholarClient | None = None,
         query_processor: QueryProcessor | None = None,
+        source_query_planner: SourceQueryPlanner | None = None,
     ):
         self.llm = openrouter_client
         self.domain_classifier = domain_classifier or DomainClassifier(openrouter_client)
@@ -42,9 +44,11 @@ class ResearchAgent:
         self.ieee_client = ieee_client or IEEEClient()
         self.semantic_scholar_client = semantic_scholar_client or SemanticScholarClient()
         self.query_processor = query_processor or QueryProcessor()
+        self.source_query_planner = source_query_planner or SourceQueryPlanner()
         self.domain = "general"
         self.active_sources: list[str] = []
         self.query_refinements: list[dict[str, str]] = []
+        self.source_queries: dict[str, list[str]] = {}
 
     async def run(
         self,
@@ -56,6 +60,7 @@ class ResearchAgent:
         tools = self.source_router.get_tools_for_domain(self.domain)
         self.active_sources = []
         self.query_refinements = []
+        self.source_queries = {}
         multi_source_guidance = (
             "Gather evidence from at least two complementary sources before you call finish_research, "
             if require_multiple_sources
@@ -197,14 +202,24 @@ class ResearchAgent:
                     raw_query = args.get("query", topic)
                     source = _source_label(func_name)
                     enriched_query = self.query_processor.enrich(raw_query, self.domain, source)
+                    compiled_query = self.source_query_planner.compile(
+                        user_query=topic,
+                        execution_query=enriched_query,
+                        domain=self.domain,
+                        source=source,
+                    )
                     logger.debug(
-                        "Dispatching search for %s with raw query=%r enriched query=%r",
+                        "Dispatching search for %s with raw query=%r enriched query=%r compiled query=%r",
                         source,
                         raw_query,
                         enriched_query,
+                        compiled_query,
                     )
-                    results = await _dispatch_search(source, enriched_query)
+                    results = await _dispatch_search(source, compiled_query)
                     tool_result_content = json.dumps([_document_payload(r) for r in results])
+                    self.source_queries.setdefault(source, [])
+                    if compiled_query and compiled_query not in self.source_queries[source]:
+                        self.source_queries[source].append(compiled_query)
                     if results:
                         if source not in self.active_sources:
                             self.active_sources.append(source)
@@ -212,6 +227,7 @@ class ResearchAgent:
                             "source": source,
                             "raw_query": raw_query,
                             "enriched_query": enriched_query,
+                            "source_query": compiled_query,
                         }
                         if refinement not in self.query_refinements:
                             self.query_refinements.append(refinement)

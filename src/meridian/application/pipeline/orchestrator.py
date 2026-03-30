@@ -58,15 +58,17 @@ def _normalize_query_refinements(query_refinements: Any) -> list[dict[str, str]]
         source = item.get("source")
         raw_query = item.get("raw_query")
         enriched_query = item.get("enriched_query")
+        source_query = item.get("source_query")
         if not all(isinstance(value, str) and value for value in (source, raw_query, enriched_query)):
             continue
-        normalized.append(
-            {
-                "source": source,
-                "raw_query": raw_query,
-                "enriched_query": enriched_query,
-            }
-        )
+        payload = {
+            "source": source,
+            "raw_query": raw_query,
+            "enriched_query": enriched_query,
+        }
+        if isinstance(source_query, str) and source_query:
+            payload["source_query"] = source_query
+        normalized.append(payload)
     return normalized
 
 
@@ -144,7 +146,9 @@ def _coverage_metadata(verdict: Any) -> dict[str, Any]:
 def _source_queries_from_refinements(query_refinements: Any) -> dict[str, list[str]]:
     mapping: dict[str, list[str]] = {}
     for item in _normalize_query_refinements(query_refinements):
-        mapping.setdefault(item["source"], []).append(item["enriched_query"])
+        compiled = item.get("source_query")
+        query_value = compiled if isinstance(compiled, str) and compiled else item["enriched_query"]
+        mapping.setdefault(item["source"], []).append(query_value)
     return mapping
 
 

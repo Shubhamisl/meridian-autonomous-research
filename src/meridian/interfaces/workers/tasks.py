@@ -37,11 +37,16 @@ def _bootstrap_worker_process(**_kwargs):
 
 async def _run_job_async(job_id: str):
     from src.meridian.application.pipeline.orchestrator import PipelineOrchestrator
+    from src.meridian.application.pipeline.coverage_gate import CoverageGate
     from src.meridian.application.pipeline.domain_classifier import DomainClassifier
     from src.meridian.application.pipeline.chunking import ChunkingService
     from src.meridian.application.pipeline.credibility_scorer import CredibilityScorer
+    from src.meridian.application.pipeline.evidence_selection import EvidenceSelectionService
     from src.meridian.application.pipeline.format_selector import FormatSelector
     from src.meridian.application.pipeline.query_processor import QueryProcessor
+    from src.meridian.application.pipeline.relevance_scorer import RelevanceScorer
+    from src.meridian.application.pipeline.reliability_policy import ReliabilityPolicy
+    from src.meridian.application.pipeline.source_query_planner import SourceQueryPlanner
     from src.meridian.application.pipeline.source_router import SourceRouter
     from src.meridian.infrastructure.database.session import SessionLocal
     from src.meridian.infrastructure.database.sqlite_repositories import (
@@ -71,6 +76,11 @@ async def _run_job_async(job_id: str):
         chunking_service = ChunkingService(credibility_scorer)
         format_selector = FormatSelector(openrouter)
         query_processor = QueryProcessor()
+        reliability_policy = ReliabilityPolicy()
+        source_query_planner = SourceQueryPlanner()
+        relevance_scorer = RelevanceScorer(openrouter_client=openrouter, policy=reliability_policy)
+        evidence_selection_service = EvidenceSelectionService(policy=reliability_policy, relevance_scorer=relevance_scorer)
+        coverage_gate = CoverageGate(reliability_policy)
         source_router = SourceRouter()
         wikipedia_client = WikipediaClient()
         arxiv_client = ArXivClient()
@@ -89,6 +99,7 @@ async def _run_job_async(job_id: str):
             ieee_client=ieee_client,
             semantic_scholar_client=semantic_scholar_client,
             query_processor=query_processor,
+            source_query_planner=source_query_planner,
         )
         synthesizer = ReportSynthesizer(openrouter)
 
@@ -102,6 +113,9 @@ async def _run_job_async(job_id: str):
             synthesizer=synthesizer,
             chunking_service=chunking_service,
             format_selector=format_selector,
+            evidence_selection_service=evidence_selection_service,
+            coverage_gate=coverage_gate,
+            reliability_policy=reliability_policy,
             transaction_manager=session,
         )
 
