@@ -1,5 +1,12 @@
 import { createContext, useEffect, useState, type ReactNode } from 'react';
-import { onAuthStateChanged, signInWithPopup, signOut, type User } from 'firebase/auth';
+import {
+  getRedirectResult,
+  onAuthStateChanged,
+  signInWithPopup,
+  signInWithRedirect,
+  signOut,
+  type User,
+} from 'firebase/auth';
 import { auth, firebaseSetup, googleProvider } from '../lib/firebase';
 
 export interface AuthContextType {
@@ -7,6 +14,7 @@ export interface AuthContextType {
   loading: boolean;
   isConfigured: boolean;
   setupMessage: string | null;
+  authError: string | null;
   login: () => Promise<void>;
   logout: () => Promise<void>;
   getToken: () => Promise<string | null>;
@@ -65,6 +73,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(() => {
     return bypassEnabled ? createE2ETestUser() : null;
   });
+  const [authError, setAuthError] = useState<string | null>(null);
   const [loading, setLoading] = useState(() => {
     if (bypassEnabled) {
       return false;
@@ -76,13 +85,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (bypassEnabled) return undefined;
 
-    if (!auth) {
-      return undefined;
-    }
+    if (!auth) return undefined;
+
+    getRedirectResult(auth).catch((error) => {
+      console.error('Firebase redirect auth failed', error);
+      setAuthError('Google sign-in could not be completed. Please try again.');
+    });
 
     const unsubscribe = onAuthStateChanged(auth, (u) => {
       setUser(u);
       setLoading(false);
+      if (u) {
+        setAuthError(null);
+      }
     });
     return unsubscribe;
   }, [bypassEnabled]);
@@ -92,7 +107,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       throw new Error(firebaseSetup.message ?? 'Firebase sign-in is not configured.');
     }
 
-    await signInWithPopup(auth, googleProvider);
+    setAuthError(null);
+
+    try {
+      await signInWithPopup(auth, googleProvider);
+      return;
+    } catch (error) {
+      console.warn('Firebase popup sign-in failed, falling back to redirect', error);
+    }
+
+    try {
+      await signInWithRedirect(auth, googleProvider);
+    } catch (error) {
+      console.error('Firebase redirect sign-in failed', error);
+      setAuthError('Google sign-in is unavailable right now. Check Firebase authorized domains and try again.');
+    }
   };
 
   const logout = async () => {
@@ -118,6 +147,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         loading,
         isConfigured: firebaseSetup.isConfigured,
         setupMessage: firebaseSetup.message,
+        authError,
         login,
         logout,
         getToken,

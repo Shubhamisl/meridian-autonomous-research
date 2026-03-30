@@ -19,7 +19,14 @@ def auth_headers() -> dict[str, str]:
 
 
 class FakeChunkRepository:
+    last_call = None
+
+    def __init__(self):
+        self.calls = []
+
     async def search(self, job_id: str, query: str, top_k: int = 5) -> list[Chunk]:
+        FakeChunkRepository.last_call = (job_id, query, top_k)
+        self.calls.append((job_id, query, top_k))
         return [
             Chunk(
                 document_id="doc-1",
@@ -69,6 +76,7 @@ async def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         return {"uid": "user-123", "email": "user@example.com"}
 
     monkeypatch.setattr(research, "ChromaChunkRepository", FakeChunkRepository, raising=False)
+    FakeChunkRepository.last_call = None
     app.dependency_overrides[research.get_db] = override_get_db
     app.dependency_overrides[get_current_user] = override_get_current_user
 
@@ -83,12 +91,26 @@ async def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
                 {
                     "domain": "computer_science",
                     "format_label": "osint",
+                    "display_query": "threat actor report",
+                    "execution_query": "threat actor report after:2022-01-01",
                     "current_phase": "synthesize",
                     "pipeline": {
                         "current_phase": "synthesize",
                         "phases": ["research", "chunk", "retrieve", "synthesize"],
                     },
                     "active_sources": ["arxiv", "ieee", "web"],
+                    "query_refinements": [
+                        {
+                            "source": "arxiv",
+                            "raw_query": "threat actor report after:2022-01-01",
+                            "enriched_query": '"threat actor report after:2022-01-01" after:2022-01-01',
+                        },
+                        {
+                            "source": "ieee",
+                            "raw_query": "threat actor report after:2022-01-01",
+                            "enriched_query": "threat actor report after:2022-01-01",
+                        },
+                    ],
                 }
             ),
         )
@@ -104,6 +126,8 @@ async def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
                 {
                     "domain": "computer_science",
                     "format_label": "osint",
+                    "display_query": "threat actor report",
+                    "execution_query": "threat actor report after:2022-01-01",
                     "current_phase": "synthesize",
                     "pipeline": {
                         "current_phase": "synthesize",
@@ -130,12 +154,25 @@ async def test_get_research_report_returns_workspace_metadata(client):
 
     assert response.status_code == 200
     payload = response.json()
+    assert payload["query"] == "threat actor report"
     assert payload["domain"] == "computer_science"
     assert payload["format_label"] == "osint"
     assert payload["pipeline"]["current_phase"] == "synthesize"
     assert payload["evidence"][0]["source"] == "arxiv"
+    assert FakeChunkRepository.last_call == ("job-123", "threat actor report after:2022-01-01", 10)
     assert payload["explainability"]["active_sources"] == ["arxiv", "ieee", "web"]
-    assert payload["explainability"]["query_refinements"] == []
+    assert payload["explainability"]["query_refinements"] == [
+        {
+            "source": "arxiv",
+            "raw_query": "threat actor report after:2022-01-01",
+            "enriched_query": '"threat actor report after:2022-01-01" after:2022-01-01',
+        },
+        {
+            "source": "ieee",
+            "raw_query": "threat actor report after:2022-01-01",
+            "enriched_query": "threat actor report after:2022-01-01",
+        },
+    ]
 
 
 @pytest.mark.asyncio
@@ -169,38 +206,42 @@ async def test_get_research_report_returns_null_phase_when_workspace_phase_is_un
 
     async with session_factory() as session:
         session.add(
-            DBResearchJob(
-                id="job-no-phase",
-                user_id="user-123",
-                query="threat actor report",
-                status="completed",
-                created_at=datetime(2024, 1, 1, 0, 0, 0),
-                completed_at=datetime(2024, 1, 1, 0, 30, 0),
-                error_message=None,
-                workspace_metadata=json.dumps(
-                    {
-                        "domain": "computer_science",
-                        "format_label": "osint",
-                        "active_sources": ["arxiv"],
-                    }
-                ),
+        DBResearchJob(
+            id="job-no-phase",
+            user_id="user-123",
+            query="threat actor report",
+            status="completed",
+            created_at=datetime(2024, 1, 1, 0, 0, 0),
+            completed_at=datetime(2024, 1, 1, 0, 30, 0),
+            error_message=None,
+            workspace_metadata=json.dumps(
+                {
+                    "domain": "computer_science",
+                    "format_label": "osint",
+                    "display_query": "threat actor report",
+                    "execution_query": "threat actor report after:2022-01-01",
+                    "active_sources": ["arxiv"],
+                }
+            ),
             )
         )
         session.add(
-            DBResearchReport(
-                id="report-no-phase",
-                job_id="job-no-phase",
-                query="threat actor report",
-                markdown_content="# Threat Actor Report",
-                created_at=datetime(2024, 1, 1, 0, 0, 0),
-                workspace_metadata=json.dumps(
-                    {
-                        "domain": "computer_science",
-                        "format_label": "osint",
-                        "active_sources": ["arxiv"],
-                    }
-                ),
-            )
+        DBResearchReport(
+            id="report-no-phase",
+            job_id="job-no-phase",
+            query="threat actor report",
+            markdown_content="# Threat Actor Report",
+            created_at=datetime(2024, 1, 1, 0, 0, 0),
+            workspace_metadata=json.dumps(
+                {
+                    "domain": "computer_science",
+                    "format_label": "osint",
+                    "display_query": "threat actor report",
+                    "execution_query": "threat actor report after:2022-01-01",
+                    "active_sources": ["arxiv"],
+                }
+            ),
+        )
         )
         await session.commit()
 
@@ -212,6 +253,7 @@ async def test_get_research_report_returns_null_phase_when_workspace_phase_is_un
 
     assert response.status_code == 200
     payload = response.json()
+    assert payload["query"] == "threat actor report"
     assert payload["pipeline"]["current_phase"] is None
 
 
@@ -276,7 +318,15 @@ async def test_create_research_commits_job_before_queue_dispatch(tmp_path: Path,
         response = await async_client.post(
             "/research/",
             headers=auth_headers(),
-            json={"query": "fresh research"},
+            json={
+                "query": "fresh research",
+                "execution_query": "fresh research after:2022-01-01",
+                "advanced_options": {
+                    "recentOnly": True,
+                    "requireMultipleSources": False,
+                    "reportDepth": "deep",
+                },
+            },
         )
 
     async with session_factory() as session:
@@ -288,3 +338,12 @@ async def test_create_research_commits_job_before_queue_dispatch(tmp_path: Path,
     assert response.status_code == 200
     assert stored_job is not None
     assert stored_job.query == "fresh research"
+    metadata = json.loads(stored_job.workspace_metadata)
+    assert metadata["display_query"] == "fresh research"
+    assert metadata["execution_query"] == "fresh research after:2022-01-01"
+    assert metadata["advanced_options"] == {
+        "recentOnly": True,
+        "requireMultipleSources": False,
+        "reportDepth": "deep",
+    }
+    assert response.json()["query"] == "fresh research"

@@ -1,3 +1,5 @@
+from typing import Literal
+
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,11 +34,24 @@ async def get_db():
 
 class ResearchRequest(BaseModel):
     query: str
+    execution_query: str | None = None
+    advanced_options: "AdvancedResearchOptionsRequest | None" = None
+
+
+class AdvancedResearchOptionsRequest(BaseModel):
+    recentOnly: bool = True
+    requireMultipleSources: bool = True
+    reportDepth: Literal["standard", "deep"] = "standard"
 
 class ResearchResponse(BaseModel):
     id: str
     status: str
     query: str | None = None
+
+
+def _display_query(metadata: dict, fallback: str) -> str:
+    candidate = metadata.get("display_query")
+    return candidate if isinstance(candidate, str) and candidate else fallback
 
 
 def _ensure_job_owner(job: ResearchJob, user: dict) -> None:
@@ -87,7 +102,13 @@ def build_evidence_items(chunks: list) -> list[EvidenceItem]:
     return evidence_items
 
 
-def build_explainability_payload(metadata: dict) -> ExplainabilityPayload:
+def build_explainability_payload(
+    metadata: dict,
+    *,
+    query: str,
+    domain: str | None,
+    execution_query: str | None = None,
+) -> ExplainabilityPayload:
     active_sources = metadata.get("active_sources", [])
     if not isinstance(active_sources, list):
         active_sources = []
@@ -113,6 +134,21 @@ def build_explainability_payload(metadata: dict) -> ExplainabilityPayload:
             )
         )
 
+    if not normalized_refinements and active_sources:
+        from src.meridian.application.pipeline.query_processor import QueryProcessor
+
+        processor = QueryProcessor()
+        fallback_query = execution_query if isinstance(execution_query, str) and execution_query else query
+        normalized_refinements = [
+            QueryRefinement(
+                source=source,
+                raw_query=fallback_query,
+                enriched_query=processor.enrich(fallback_query, domain or "general", source),
+            )
+            for source in active_sources
+            if isinstance(source, str) and source
+        ]
+
     return ExplainabilityPayload(
         active_sources=[source for source in active_sources if isinstance(source, str) and source],
         query_refinements=normalized_refinements,
@@ -121,6 +157,7 @@ def build_explainability_payload(metadata: dict) -> ExplainabilityPayload:
 
 def _normalize_pipeline_phase(candidate: object) -> str | None:
     return candidate if isinstance(candidate, str) and candidate in PHASES else None
+
 
 @router.post("/", response_model=ResearchResponse)
 async def create_research(
@@ -132,6 +169,15 @@ async def create_research(
     job = ResearchJob(query=request.query, user_id=user["uid"])
 
     await job_repo.save(job)
+    workspace_metadata = await job_repo.get_workspace_metadata(job.id)
+    workspace_metadata["display_query"] = request.query
+    workspace_metadata["execution_query"] = request.execution_query or request.query
+    workspace_metadata["advanced_options"] = (
+        request.advanced_options.model_dump()
+        if request.advanced_options is not None
+        else AdvancedResearchOptionsRequest().model_dump()
+    )
+    await job_repo.save_workspace_metadata(job.id, workspace_metadata)
     await db.commit()
 
     try:
@@ -142,7 +188,11 @@ async def create_research(
         await job_repo.save(job)
         await db.commit()
 
-    return ResearchResponse(id=job.id, status=job.status, query=job.query)
+    return ResearchResponse(
+        id=job.id,
+        status=job.status,
+        query=_display_query(workspace_metadata, job.query),
+    )
 
 @router.get("/", response_model=list[ResearchResponse])
 async def list_user_research(
@@ -156,7 +206,17 @@ async def list_user_research(
         .order_by(DBResearchJob.created_at.desc())
     )
     jobs = result.scalars().all()
-    return [ResearchResponse(id=j.id, status=j.status, query=j.query) for j in jobs]
+    responses = []
+    for job in jobs:
+        metadata = await SQLiteResearchJobRepository(db).get_workspace_metadata(job.id)
+        responses.append(
+            ResearchResponse(
+                id=job.id,
+                status=job.status,
+                query=_display_query(metadata, job.query),
+            )
+        )
+    return responses
 
 @router.get("/{job_id}", response_model=ResearchResponse)
 async def get_research_status(
@@ -170,7 +230,8 @@ async def get_research_status(
         raise HTTPException(status_code=404, detail="Job not found")
     _ensure_job_owner(job, user)
 
-    return ResearchResponse(id=job.id, status=job.status, query=job.query)
+    metadata = await job_repo.get_workspace_metadata(job.id)
+    return ResearchResponse(id=job.id, status=job.status, query=_display_query(metadata, job.query))
 
 @router.get("/{job_id}/report", response_model=ResearchWorkspaceResponse)
 async def get_research_report(
@@ -191,12 +252,16 @@ async def get_research_report(
         **(await _workspace_metadata(job_repo, job.id)),
         **(await _workspace_metadata(report_repo, report.id)),
     }
-    workspace_metadata.setdefault("query", report.query)
+    response_query = _display_query(workspace_metadata, report.query)
+    workspace_metadata.setdefault("query", response_query)
     evidence_chunks = []
     if ChromaChunkRepository is not None:
         try:
             chunk_repo = ChromaChunkRepository()
-            evidence_chunks = await chunk_repo.search(job_id, query=report.query, top_k=10)
+            evidence_query = workspace_metadata.get("execution_query")
+            if not isinstance(evidence_query, str) or not evidence_query:
+                evidence_query = report.query
+            evidence_chunks = await chunk_repo.search(job_id, query=evidence_query, top_k=10)
         except Exception as exc:
             logging.warning("Failed to load evidence for job %s: %s", job_id, exc)
 
@@ -215,11 +280,16 @@ async def get_research_report(
     return ResearchWorkspaceResponse(
         id=report.id,
         job_id=report.job_id,
-        query=report.query,
+        query=response_query,
         markdown_content=report.markdown_content,
         domain=workspace_metadata.get("domain"),
         format_label=workspace_metadata.get("format_label"),
         pipeline=PipelinePayload(current_phase=current_phase, phases=phases),
         evidence=build_evidence_items(evidence_chunks),
-        explainability=build_explainability_payload(workspace_metadata),
+        explainability=build_explainability_payload(
+            workspace_metadata,
+            query=response_query,
+            domain=workspace_metadata.get("domain"),
+            execution_query=workspace_metadata.get("execution_query"),
+        ),
     )

@@ -108,6 +108,21 @@ def _finish_and_tool_call(tool_name: str, query: str = "cancer"):
     )
 
 
+def _search_and_finish_calls(*tool_specs: tuple[str, str]):
+    tool_calls = []
+    for index, (tool_name, query) in enumerate(tool_specs, start=1):
+        tool_calls.append(FakeToolCall(str(index), tool_name, json.dumps({"query": query})))
+    tool_calls.append(FakeToolCall(str(len(tool_calls) + 1), "finish_research", "{\"summary\": \"done\"}"))
+    return FakeResponse(tool_calls)
+
+
+def _finish_then_search_calls(*tool_specs: tuple[str, str]):
+    tool_calls = [FakeToolCall("1", "finish_research", "{\"summary\": \"done\"}")]
+    for index, (tool_name, query) in enumerate(tool_specs, start=2):
+        tool_calls.append(FakeToolCall(str(index), tool_name, json.dumps({"query": query})))
+    return FakeResponse(tool_calls)
+
+
 @pytest.mark.asyncio
 async def test_research_agent_enriches_query_before_dispatching_search():
     tools = [{"type": "function", "function": {"name": "search_arxiv", "parameters": {"type": "object"}}}]
@@ -200,3 +215,224 @@ async def test_research_agent_normalizes_search_arxiv_to_source_label():
     await agent.run("cancer", max_iterations=1)
 
     assert query_processor.calls == [("cancer", "general", "arxiv")]
+
+
+@pytest.mark.asyncio
+async def test_research_agent_raises_when_max_iterations_exhaust_with_only_wikipedia_evidence():
+    tools = [
+        {"type": "function", "function": {"name": "search_wikipedia", "parameters": {"type": "object"}}},
+        {"type": "function", "function": {"name": "search_web", "parameters": {"type": "object"}}},
+        {"type": "function", "function": {"name": "finish_research", "parameters": {"type": "object"}}},
+    ]
+    classifier = FakeClassifier("general")
+    router = FakeRouter(tools)
+    llm = FakeLLM([_search_and_finish_calls(("search_wikipedia", "cancer"))])
+    wikipedia_client = FakeSourceClient(
+        Document(source="wikipedia", title="Cancer", content="Wikipedia summary", url="https://example.com/wiki")
+    )
+
+    agent = ResearchAgent(
+        llm,
+        domain_classifier=classifier,
+        source_router=router,
+        wikipedia_client=wikipedia_client,
+    )
+
+    with pytest.raises(RuntimeError, match="non-Wikipedia source"):
+        await agent.run("cancer", max_iterations=1)
+
+
+@pytest.mark.asyncio
+async def test_research_agent_raises_when_model_stops_after_blocked_wikipedia_only_finish():
+    tools = [
+        {"type": "function", "function": {"name": "search_wikipedia", "parameters": {"type": "object"}}},
+        {"type": "function", "function": {"name": "search_web", "parameters": {"type": "object"}}},
+        {"type": "function", "function": {"name": "finish_research", "parameters": {"type": "object"}}},
+    ]
+    classifier = FakeClassifier("general")
+    router = FakeRouter(tools)
+    llm = FakeLLM(
+        [
+            _search_and_finish_calls(("search_wikipedia", "cancer")),
+            FakeResponse([]),
+        ]
+    )
+    wikipedia_client = FakeSourceClient(
+        Document(source="wikipedia", title="Cancer", content="Wikipedia summary", url="https://example.com/wiki")
+    )
+
+    agent = ResearchAgent(
+        llm,
+        domain_classifier=classifier,
+        source_router=router,
+        wikipedia_client=wikipedia_client,
+    )
+
+    with pytest.raises(RuntimeError, match="non-Wikipedia source"):
+        await agent.run("cancer", max_iterations=2)
+
+
+@pytest.mark.asyncio
+async def test_research_agent_raises_when_model_stops_after_blocked_single_source_finish():
+    tools = [
+        {"type": "function", "function": {"name": "search_web", "parameters": {"type": "object"}}},
+        {"type": "function", "function": {"name": "search_arxiv", "parameters": {"type": "object"}}},
+        {"type": "function", "function": {"name": "finish_research", "parameters": {"type": "object"}}},
+    ]
+    classifier = FakeClassifier("general")
+    router = FakeRouter(tools)
+    llm = FakeLLM(
+        [
+            _search_and_finish_calls(("search_web", "semiconductor supply chains")),
+            FakeResponse([]),
+        ]
+    )
+    web_client = FakeSourceClient(
+        Document(
+            source="web",
+            title="Supply chain overview",
+            content="Analyst coverage of semiconductor supply chains.",
+            url="https://example.com/supply-chain",
+        )
+    )
+
+    agent = ResearchAgent(
+        llm,
+        domain_classifier=classifier,
+        source_router=router,
+        web_search_client=web_client,
+    )
+
+    with pytest.raises(RuntimeError, match="could not finish safely"):
+        await agent.run("semiconductor supply chains", max_iterations=2)
+
+
+@pytest.mark.asyncio
+async def test_research_agent_recovers_after_blocked_finish_once_additional_evidence_is_gathered():
+    tools = [
+        {"type": "function", "function": {"name": "search_web", "parameters": {"type": "object"}}},
+        {"type": "function", "function": {"name": "search_arxiv", "parameters": {"type": "object"}}},
+        {"type": "function", "function": {"name": "finish_research", "parameters": {"type": "object"}}},
+    ]
+    classifier = FakeClassifier("general")
+    router = FakeRouter(tools)
+    llm = FakeLLM(
+        [
+            _search_and_finish_calls(("search_web", "battery recycling")),
+            _search_and_finish_calls(("search_arxiv", "battery recycling")),
+        ]
+    )
+    web_client = FakeSourceClient(
+        Document(
+            source="web",
+            title="Battery recycling market",
+            content="Industry reporting on recycling capacity.",
+            url="https://example.com/recycling-market",
+        )
+    )
+    arxiv_client = FakeSourceClient(
+        Document(
+            source="arxiv",
+            title="Battery recycling methods",
+            content="Research paper on recycling methods.",
+            url="https://arxiv.org/abs/1234.5678",
+        )
+    )
+
+    agent = ResearchAgent(
+        llm,
+        domain_classifier=classifier,
+        source_router=router,
+        web_search_client=web_client,
+        arxiv_client=arxiv_client,
+    )
+
+    documents = await agent.run("battery recycling", max_iterations=2)
+
+    assert [document.source for document in documents] == ["web", "arxiv"]
+
+
+@pytest.mark.asyncio
+async def test_research_agent_allows_finish_when_later_searches_in_same_batch_make_turn_complete():
+    tools = [
+        {"type": "function", "function": {"name": "search_web", "parameters": {"type": "object"}}},
+        {"type": "function", "function": {"name": "search_arxiv", "parameters": {"type": "object"}}},
+        {"type": "function", "function": {"name": "finish_research", "parameters": {"type": "object"}}},
+    ]
+    classifier = FakeClassifier("general")
+    router = FakeRouter(tools)
+    llm = FakeLLM(
+        [
+            _finish_then_search_calls(
+                ("search_web", "battery recycling"),
+                ("search_arxiv", "battery recycling"),
+            )
+        ]
+    )
+    web_client = FakeSourceClient(
+        Document(
+            source="web",
+            title="Battery recycling market",
+            content="Industry reporting on recycling capacity.",
+            url="https://example.com/recycling-market",
+        )
+    )
+    arxiv_client = FakeSourceClient(
+        Document(
+            source="arxiv",
+            title="Battery recycling methods",
+            content="Research paper on recycling methods.",
+            url="https://arxiv.org/abs/1234.5678",
+        )
+    )
+
+    agent = ResearchAgent(
+        llm,
+        domain_classifier=classifier,
+        source_router=router,
+        web_search_client=web_client,
+        arxiv_client=arxiv_client,
+    )
+
+    documents = await agent.run("battery recycling", max_iterations=1)
+
+    assert [document.source for document in documents] == ["web", "arxiv"]
+
+
+@pytest.mark.asyncio
+async def test_research_agent_allows_single_non_wikipedia_source_when_multiple_sources_not_required():
+    tools = [
+        {"type": "function", "function": {"name": "search_web", "parameters": {"type": "object"}}},
+        {"type": "function", "function": {"name": "search_arxiv", "parameters": {"type": "object"}}},
+        {"type": "function", "function": {"name": "finish_research", "parameters": {"type": "object"}}},
+    ]
+    classifier = FakeClassifier("general")
+    router = FakeRouter(tools)
+    llm = FakeLLM(
+        [
+            _search_and_finish_calls(("search_web", "semiconductor supply chains")),
+        ]
+    )
+    web_client = FakeSourceClient(
+        Document(
+            source="web",
+            title="Supply chain overview",
+            content="Analyst coverage of semiconductor supply chains.",
+            url="https://example.com/supply-chain",
+        )
+    )
+
+    agent = ResearchAgent(
+        llm,
+        domain_classifier=classifier,
+        source_router=router,
+        web_search_client=web_client,
+    )
+
+    documents = await agent.run(
+        "semiconductor supply chains",
+        max_iterations=1,
+        require_multiple_sources=False,
+    )
+
+    assert [document.source for document in documents] == ["web"]

@@ -42,6 +42,12 @@ export interface ResearchWorkspacePayload {
 
 export type ResearchReport = ResearchWorkspacePayload;
 
+export interface ResearchAdvancedOptions {
+  recentOnly: boolean;
+  requireMultipleSources: boolean;
+  reportDepth: 'standard' | 'deep';
+}
+
 export async function authFetch(
   getToken: () => Promise<string | null>,
   url: string,
@@ -68,11 +74,20 @@ export async function fetchResearchJobs(getToken: () => Promise<string | null>) 
   return (await response.json()) as ResearchJobSummary[];
 }
 
-export async function createResearchJob(getToken: () => Promise<string | null>, query: string) {
+export async function createResearchJob(
+  getToken: () => Promise<string | null>,
+  query: string,
+  executionQuery = query,
+  advancedOptions?: ResearchAdvancedOptions,
+) {
   const response = await authFetch(getToken, '/api/research/', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query }),
+    body: JSON.stringify({
+      query,
+      execution_query: executionQuery,
+      advanced_options: advancedOptions,
+    }),
   });
 
   if (!response.ok) throw new Error('Failed to start research');

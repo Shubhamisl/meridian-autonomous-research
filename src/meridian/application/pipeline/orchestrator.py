@@ -67,11 +67,48 @@ def _normalize_query_refinements(query_refinements: Any) -> list[dict[str, str]]
     return normalized
 
 
-def _derive_query_refinements(query: str, sources: list[str], recorded: Any) -> list[dict[str, str]]:
+def _normalize_advanced_options(options: Any) -> dict[str, Any]:
+    normalized = {
+        "recentOnly": True,
+        "requireMultipleSources": True,
+        "reportDepth": "standard",
+    }
+    if not isinstance(options, dict):
+        return normalized
+
+    if isinstance(options.get("recentOnly"), bool):
+        normalized["recentOnly"] = options["recentOnly"]
+    if isinstance(options.get("requireMultipleSources"), bool):
+        normalized["requireMultipleSources"] = options["requireMultipleSources"]
+    if options.get("reportDepth") in {"standard", "deep"}:
+        normalized["reportDepth"] = options["reportDepth"]
+    return normalized
+
+
+def _derive_query_refinements(
+    query: str,
+    sources: list[str],
+    domain: str,
+    recorded: Any,
+) -> list[dict[str, str]]:
     normalized = _normalize_query_refinements(recorded)
     if normalized:
         return normalized
-    return []
+
+    from src.meridian.application.pipeline.query_processor import QueryProcessor
+
+    processor = QueryProcessor()
+    derived: list[dict[str, str]] = []
+    for source in _unique_in_order(sources):
+        enriched_query = processor.enrich(query, domain, source)
+        derived.append(
+            {
+                "source": source,
+                "raw_query": query,
+                "enriched_query": enriched_query,
+            }
+        )
+    return derived
 
 
 class PipelineOrchestrator:
@@ -119,22 +156,32 @@ class PipelineOrchestrator:
 
         workspace_metadata = await self.job_metadata_store.get_workspace_metadata(job.id)
         try:
+            advanced_options = _normalize_advanced_options(workspace_metadata.get("advanced_options"))
+            workspace_metadata["advanced_options"] = advanced_options
             _update_pipeline_phase(workspace_metadata, "research")
             job = job.start()
             await self.job_repo.save(job)
             await self.job_metadata_store.save_workspace_metadata(job.id, workspace_metadata)
             await self._commit_pending()
 
-            documents = await self.agent.run(topic=job.query)
+            execution_query = workspace_metadata.get("execution_query")
+            if not isinstance(execution_query, str) or not execution_query:
+                execution_query = job.query
+            documents = await self.agent.run(
+                topic=execution_query,
+                require_multiple_sources=advanced_options["requireMultipleSources"],
+            )
             workspace_metadata["domain"] = getattr(self.agent, "domain", "general")
             active_sources = _unique_in_order(
                 [document.source for document in documents]
                 or list(getattr(self.agent, "active_sources", []))
             )
             workspace_metadata["active_sources"] = active_sources
+            domain = workspace_metadata["domain"]
             workspace_metadata["query_refinements"] = _derive_query_refinements(
-                job.query,
+                execution_query,
                 active_sources,
+                domain,
                 getattr(self.agent, "query_refinements", []),
             )
 
@@ -158,13 +205,13 @@ class PipelineOrchestrator:
             _update_pipeline_phase(workspace_metadata, "retrieve")
             await self.job_metadata_store.save_workspace_metadata(job.id, workspace_metadata)
             await self._commit_pending()
-            retrieved_chunks = await self.chunk_repo.search(job_id, query=job.query, top_k=10)
+            retrieved_chunks = await self.chunk_repo.search(job_id, query=execution_query, top_k=10)
 
             if not retrieved_chunks:
                 retrieved_chunks = all_chunks[:10]
 
             domain = workspace_metadata.get("domain", getattr(self.agent, "domain", "general"))
-            format_label = await self.format_selector.select(domain, job.query)
+            format_label = await self.format_selector.select(domain, execution_query)
             logger.info("Selected report format: %s", format_label)
             workspace_metadata["format_label"] = format_label
             _update_pipeline_phase(workspace_metadata, "synthesize")
@@ -176,6 +223,7 @@ class PipelineOrchestrator:
                 job.query,
                 retrieved_chunks,
                 format_label=format_label,
+                report_depth=advanced_options["reportDepth"],
             )
             async with self._transaction():
                 await self.report_repo.save(report)
