@@ -170,6 +170,22 @@ The LLM should not score every document. It should be reserved for:
 - source disagreement
 - very short or noisy metadata-only results
 
+Threshold policy:
+
+- base automatic reject: `< 0.45`
+- borderline band: `0.45 <= score < 0.70`
+- base automatic accept: `>= 0.70`
+- final minimum accepted relevance after adjudication: `0.60`
+
+These per-document thresholds should be fixed across domains in v1. Domain differences should be expressed through coverage requirements rather than by making document-level acceptance harder to reason about.
+
+LLM adjudication budget:
+
+- maximum `5` candidate documents per request
+- adjudication only for borderline candidates after deduplication
+- if adjudication times out or fails, fall back to the non-LLM score
+- a borderline candidate with failed adjudication remains rejected unless its non-LLM score independently clears the automatic accept threshold
+
 ### 3. EvidenceSelectionService
 
 Location:
@@ -196,6 +212,33 @@ Outputs should include:
 
 This service becomes the quality gate before chunking.
 
+Decomposition:
+
+- `EvidenceSelectionService` should be a facade with one public method, for example:
+  - `select(query, domain, candidates, source_queries) -> EvidenceSelectionResult`
+- internally it should orchestrate smaller focused collaborators:
+  - `CandidateDeduplicator`
+  - `RelevanceScorer`
+  - `DiversitySelector`
+  - selection metadata assembly
+
+Execution order:
+
+1. normalize and deduplicate candidates
+2. apply lightweight source sanity checks
+3. score relevance
+4. send only borderline candidates to LLM adjudication
+5. apply diversity selection and source-balance rules
+6. build accepted/rejected outputs with reasons
+
+Deduplication must happen before relevance scoring so Meridian does not waste compute scoring multiple near-identical candidates.
+
+Call pattern:
+
+- the orchestrator should call one facade method on `EvidenceSelectionService`
+- the orchestrator should not manually step through sub-stages
+- internal collaborators should stay unit-testable in isolation
+
 ### 4. CoverageGate
 
 Location:
@@ -213,12 +256,63 @@ Coverage should consider:
 - source diversity
 - domain-specific sufficiency
 
+Coverage thresholds:
+
+- `biomedical`: minimum `3` accepted documents, minimum `2` distinct sources, minimum accepted-set average relevance `0.70`
+- `computer_science`: minimum `3` accepted documents, minimum `2` distinct sources, minimum accepted-set average relevance `0.68`
+- `economics`: minimum `3` accepted documents, minimum `2` distinct sources, minimum accepted-set average relevance `0.68`
+- `legal`: minimum `3` accepted documents, minimum `2` distinct sources, minimum accepted-set average relevance `0.70`
+- `general`: minimum `2` accepted documents, minimum `1` distinct source, minimum accepted-set average relevance `0.65`
+
+Source diversity in v1 should be operationalized as:
+
+- minimum distinct source count by domain
+- no single source contributing more than `60%` of accepted documents when more than one source is available
+- at most `2` near-duplicate accepted documents from the same source/query family
+
+Threshold ownership:
+
+- thresholds should be configuration-driven, not hardcoded inline
+- introduce an injectable `ReliabilityPolicy` or `EvidencePolicy` settings object in the application layer
+- the values above are the default production policy for v1
+- learned thresholds are explicitly out of scope for this iteration
+
 If coverage is insufficient, the orchestrator should:
 
 - retry with a narrower or more focused search plan, or
 - fail with a precise "insufficient relevant evidence" reason
 
 It must not silently synthesize weak output.
+
+Retry policy:
+
+- maximum retry count: `1`
+- the retry happens inside the background job, so from the user's perspective it is asynchronous and remains part of the same workspace run
+- after one failed retry, Meridian must fail with a precise quality message rather than continue searching indefinitely
+
+Retry plan generation:
+
+- v1 should use a deterministic narrowing strategy, not free-form agent replanning
+- `SourceQueryPlanner` should provide a refinement method that uses:
+  - original user query
+  - domain
+  - source-native queries attempted
+  - rejection reasons from `EvidenceSelectionService`
+- the refinement strategy should:
+  - preserve the same domain
+  - narrow the query around the strongest intent terms
+  - drop unsupported or noisy query fragments
+  - prune sources that returned only rejected evidence when appropriate
+
+Retry can change:
+
+- source-native query strings
+- source subset
+
+Retry should not change:
+
+- display query
+- classified domain
 
 ## Data Flow
 
