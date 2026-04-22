@@ -99,6 +99,23 @@ class FakeQueryProcessor:
         return self.enriched_query
 
 
+class FakeSourceQueryPlanner:
+    def __init__(self, compiled_query="compiled query"):
+        self.compiled_query = compiled_query
+        self.calls = []
+
+    def compile(self, user_query, execution_query, domain, source):
+        self.calls.append(
+            {
+                "user_query": user_query,
+                "execution_query": execution_query,
+                "domain": domain,
+                "source": source,
+            }
+        )
+        return self.compiled_query
+
+
 def _finish_and_tool_call(tool_name: str, query: str = "cancer"):
     return FakeResponse(
         [
@@ -130,6 +147,7 @@ async def test_research_agent_enriches_query_before_dispatching_search():
     router = FakeRouter(tools)
     llm = FakeLLM([_finish_and_tool_call("search_arxiv")])
     query_processor = FakeQueryProcessor(enriched_query='"quoted" enriched query')
+    query_planner = FakeSourceQueryPlanner(compiled_query='"mRNA vaccine"')
     client = FakeSourceClient(
         Document(source="arxiv", title="ArXiv Title", content="ArXiv abstract", url="https://example.com")
     )
@@ -140,12 +158,21 @@ async def test_research_agent_enriches_query_before_dispatching_search():
         source_router=router,
         arxiv_client=client,
         query_processor=query_processor,
+        source_query_planner=query_planner,
     )
 
     await agent.run("cancer", max_iterations=1)
 
     assert query_processor.calls == [("cancer", "biomedical", "arxiv")]
-    assert client.calls == ['"quoted" enriched query']
+    assert query_planner.calls == [
+        {
+            "user_query": "cancer",
+            "execution_query": '"quoted" enriched query',
+            "domain": "biomedical",
+            "source": "arxiv",
+        }
+    ]
+    assert client.calls == ['"mRNA vaccine"']
 
 
 @pytest.mark.asyncio
@@ -174,6 +201,7 @@ async def test_research_agent_logs_raw_and_enriched_queries_at_debug(caplog):
     router = FakeRouter(tools)
     llm = FakeLLM([_finish_and_tool_call("search_web")])
     query_processor = FakeQueryProcessor(enriched_query="enriched web query")
+    query_planner = FakeSourceQueryPlanner(compiled_query="compiled web query")
     client = FakeSourceClient(
         Document(source="web", title="Web Title", content="Web body", url="https://example.com")
     )
@@ -184,6 +212,7 @@ async def test_research_agent_logs_raw_and_enriched_queries_at_debug(caplog):
         source_router=router,
         web_search_client=client,
         query_processor=query_processor,
+        source_query_planner=query_planner,
     )
 
     caplog.set_level(logging.DEBUG)
@@ -191,6 +220,7 @@ async def test_research_agent_logs_raw_and_enriched_queries_at_debug(caplog):
 
     assert any("raw query='cancer'" in record.message for record in caplog.records)
     assert any("enriched query='enriched web query'" in record.message for record in caplog.records)
+    assert any("compiled query='compiled web query'" in record.message for record in caplog.records)
 
 
 @pytest.mark.asyncio
@@ -200,6 +230,7 @@ async def test_research_agent_normalizes_search_arxiv_to_source_label():
     router = FakeRouter(tools)
     llm = FakeLLM([_finish_and_tool_call("search_arxiv")])
     query_processor = FakeQueryProcessor(enriched_query="normalized query")
+    query_planner = FakeSourceQueryPlanner(compiled_query="compiled arxiv query")
     client = FakeSourceClient(
         Document(source="arxiv", title="ArXiv Title", content="ArXiv abstract", url="https://example.com")
     )
@@ -210,11 +241,53 @@ async def test_research_agent_normalizes_search_arxiv_to_source_label():
         source_router=router,
         arxiv_client=client,
         query_processor=query_processor,
+        source_query_planner=query_planner,
     )
 
     await agent.run("cancer", max_iterations=1)
 
     assert query_processor.calls == [("cancer", "general", "arxiv")]
+    assert query_planner.calls[0]["source"] == "arxiv"
+    assert agent.source_queries == {"arxiv": ["compiled arxiv query"]}
+    assert agent.query_refinements == [
+        {
+            "source": "arxiv",
+            "raw_query": "cancer",
+            "enriched_query": "normalized query",
+            "source_query": "compiled arxiv query",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_research_agent_uses_source_native_pubmed_query_for_dispatch():
+    tools = [{"type": "function", "function": {"name": "search_pubmed", "parameters": {"type": "object"}}}]
+    classifier = FakeClassifier("biomedical")
+    router = FakeRouter(tools)
+    llm = FakeLLM([_finish_and_tool_call("search_pubmed", query="mRNA vaccine")])
+    query_processor = FakeQueryProcessor(enriched_query='"mRNA vaccine" after:2022-01-01')
+    query_planner = FakeSourceQueryPlanner(
+        compiled_query='("mRNA vaccine") AND ("2022"[Date - Publication] : "3000"[Date - Publication])'
+    )
+    client = FakeSourceClient(
+        Document(source="pubmed", title="PubMed Title", content="PubMed abstract", url="https://example.com/pubmed")
+    )
+
+    agent = ResearchAgent(
+        llm,
+        domain_classifier=classifier,
+        source_router=router,
+        pubmed_client=client,
+        query_processor=query_processor,
+        source_query_planner=query_planner,
+    )
+
+    await agent.run("Recent advances in mRNA vaccines", max_iterations=1, require_multiple_sources=False)
+
+    assert client.calls == ['("mRNA vaccine") AND ("2022"[Date - Publication] : "3000"[Date - Publication])']
+    assert agent.source_queries == {
+        "pubmed": ['("mRNA vaccine") AND ("2022"[Date - Publication] : "3000"[Date - Publication])']
+    }
 
 
 @pytest.mark.asyncio

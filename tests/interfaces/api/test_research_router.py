@@ -99,6 +99,65 @@ async def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
                         "phases": ["research", "chunk", "retrieve", "synthesize"],
                     },
                     "active_sources": ["arxiv", "ieee", "web"],
+                    "selection": {
+                        "accepted_count": 2,
+                        "rejected_count": 1,
+                        "source_queries": {
+                            "arxiv": ['"threat actor report after:2022-01-01"'],
+                            "ieee": ["threat actor report after:2022-01-01"],
+                        },
+                        "llm_budget_limit": 5,
+                        "llm_budget_used": 1,
+                        "llm_budget_remaining": 4,
+                        "accepted": [
+                            {
+                                "document_id": "doc-1",
+                                "source": "arxiv",
+                                "title": "Threat Actor Tradecraft",
+                                "url": "https://example.com/paper",
+                                "reason": "accepted",
+                                "relevance_score": 0.91,
+                                "scorer_reason": "llm_adjudicated",
+                                "scorer_detail": "aligned with query",
+                                "adjudication_detail": "aligned with query",
+                                "source_query": '"threat actor report after:2022-01-01"',
+                                "credibility_score": 0.91,
+                                "llm_attempted": True,
+                                "llm_success": True,
+                            }
+                        ],
+                        "rejected": [
+                            {
+                                "document_id": "doc-2",
+                                "source": "web",
+                                "title": "Off topic source",
+                                "url": "https://example.com/off-topic",
+                                "reason": "low_relevance",
+                                "relevance_score": 0.12,
+                                "scorer_reason": "lexical_mismatch",
+                                "source_query": "threat actor report after:2022-01-01",
+                                "credibility_score": None,
+                                "llm_attempted": False,
+                                "llm_success": False,
+                            }
+                        ],
+                    },
+                    "coverage": {
+                        "action": "synthesize",
+                        "reason": "sufficient_coverage",
+                        "accepted_count": 2,
+                        "distinct_sources": 2,
+                        "average_relevance": 0.81,
+                        "source_distribution": {"arxiv": 1, "ieee": 1},
+                        "query_family_distribution": {
+                            'arxiv::"threat actor report after:2022-01-01"': 1,
+                            "ieee::threat actor report after:2022-01-01": 1,
+                        },
+                        "required_documents": 2,
+                        "required_sources": 1,
+                        "required_average_relevance": 0.65,
+                        "message": "coverage_sufficient",
+                    },
                     "query_refinements": [
                         {
                             "source": "arxiv",
@@ -131,7 +190,7 @@ async def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
                     "current_phase": "synthesize",
                     "pipeline": {
                         "current_phase": "synthesize",
-                        "phases": ["research", "chunk", "retrieve", "synthesize"],
+                        "phases": ["research", "select", "chunk", "retrieve", "synthesize"],
                     },
                     "active_sources": ["arxiv", "ieee", "web"],
                 }
@@ -173,6 +232,11 @@ async def test_get_research_report_returns_workspace_metadata(client):
             "enriched_query": "threat actor report after:2022-01-01",
         },
     ]
+    assert payload["explainability"]["selection"]["accepted_count"] == 2
+    assert payload["explainability"]["selection"]["source_queries"]["arxiv"] == ['"threat actor report after:2022-01-01"']
+    assert payload["explainability"]["selection"]["accepted"][0]["credibility_score"] == 0.91
+    assert payload["explainability"]["coverage"]["action"] == "synthesize"
+    assert payload["explainability"]["coverage"]["source_distribution"] == {"arxiv": 1, "ieee": 1}
 
 
 @pytest.mark.asyncio
@@ -266,6 +330,83 @@ async def test_get_research_report_preserves_zero_credibility_scores(client, mon
     assert response.status_code == 200
     payload = response.json()
     assert payload["evidence"][0]["credibility_score"] == 0.0
+
+
+@pytest.mark.asyncio
+async def test_get_research_report_recognizes_select_phase(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    db_path = tmp_path / "research-router-select-phase.db"
+    engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}")
+    session_factory = async_sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    async def override_get_db():
+        async with session_factory() as session:
+            yield session
+
+    async def override_get_current_user():
+        return {"uid": "user-123", "email": "user@example.com"}
+
+    monkeypatch.setattr(research, "ChromaChunkRepository", FakeChunkRepository, raising=False)
+    app.dependency_overrides[research.get_db] = override_get_db
+    app.dependency_overrides[get_current_user] = override_get_current_user
+
+    async with session_factory() as session:
+        session.add(
+            DBResearchJob(
+                id="job-select-phase",
+                user_id="user-123",
+                query="ai regulation",
+                status="running",
+                created_at=datetime(2024, 1, 1, 0, 0, 0),
+                completed_at=None,
+                error_message=None,
+                workspace_metadata=json.dumps(
+                    {
+                        "domain": "general",
+                        "display_query": "ai regulation",
+                        "execution_query": "ai regulation",
+                        "pipeline": {
+                            "current_phase": "select",
+                            "phases": ["research", "select", "chunk", "retrieve", "synthesize"],
+                        },
+                    }
+                ),
+            )
+        )
+        session.add(
+            DBResearchReport(
+                id="report-select-phase",
+                job_id="job-select-phase",
+                query="ai regulation",
+                markdown_content="# Interim",
+                created_at=datetime(2024, 1, 1, 0, 0, 0),
+                workspace_metadata=json.dumps(
+                    {
+                        "domain": "general",
+                        "display_query": "ai regulation",
+                        "execution_query": "ai regulation",
+                        "pipeline": {
+                            "current_phase": "select",
+                            "phases": ["research", "select", "chunk", "retrieve", "synthesize"],
+                        },
+                    }
+                ),
+            )
+        )
+        await session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as async_client:
+        response = await async_client.get("/research/job-select-phase/report", headers=auth_headers())
+
+    app.dependency_overrides.clear()
+    await engine.dispose()
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["pipeline"]["current_phase"] == "select"
+    assert payload["pipeline"]["phases"] == ["research", "select", "chunk", "retrieve", "synthesize"]
 
 
 @pytest.mark.asyncio

@@ -102,6 +102,7 @@ class FakeResearchAgent:
         ieee_client=None,
         semantic_scholar_client=None,
         query_processor=None,
+        source_query_planner=None,
     ):
         self.openrouter_client = openrouter_client
         self.domain_classifier = domain_classifier
@@ -113,6 +114,7 @@ class FakeResearchAgent:
         self.ieee_client = ieee_client
         self.semantic_scholar_client = semantic_scholar_client
         self.query_processor = query_processor
+        self.source_query_planner = source_query_planner
         self.__class__.instances.append(self)
 
     async def run(self, topic, max_iterations=5):
@@ -242,6 +244,9 @@ async def test_run_job_async_runs_init_db_before_wiring_dependencies(monkeypatch
     assert format_selector is FakeFormatSelector.instances[0]
     assert format_selector.openrouter_client.__class__ is FakeOpenRouterClient
     assert agent.query_processor is FakeQueryProcessor.instances[0]
+    assert agent.source_query_planner is not None
+    assert orchestrator.kwargs["evidence_selection_service"] is not None
+    assert orchestrator.kwargs["coverage_gate"] is not None
     assert orchestrator.kwargs["job_metadata_store"].__class__ is FakeRepo
     assert orchestrator.kwargs["report_metadata_store"].__class__ is FakeRepo
     assert orchestrator.kwargs["transaction_manager"] is fake_session
